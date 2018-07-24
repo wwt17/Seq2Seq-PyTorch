@@ -379,7 +379,7 @@ class LSTMAttentionDot(nn.Module):
         steps = range(input.size(0))
         for i in steps:
             hidden = recurrence(input[i], hidden)
-            output.append(isinstance(hidden, tuple) and hidden[0] or hidden)
+            output.append(hidden[0] if isinstance(hidden, tuple) else hidden)
 
         output = torch.cat(output, 0).view(input.size(0), *output[0].size())
 
@@ -800,18 +800,20 @@ class Seq2SeqAttention(nn.Module):
         """Get cell states and hidden states."""
         batch_size = input.size(0) \
             if self.encoder.batch_first else input.size(1)
-        h0_encoder = Variable(torch.zeros(
+        h0_encoder = torch.zeros(
             self.encoder.num_layers * self.num_directions,
             batch_size,
-            self.src_hidden_dim
-        ), requires_grad=False)
-        c0_encoder = Variable(torch.zeros(
+            self.src_hidden_dim,
+            device='cuda'
+        )
+        c0_encoder = torch.zeros(
             self.encoder.num_layers * self.num_directions,
             batch_size,
-            self.src_hidden_dim
-        ), requires_grad=False)
+            self.src_hidden_dim,
+            device='cuda'
+        )
 
-        return h0_encoder.cuda(), c0_encoder.cuda()
+        return h0_encoder, c0_encoder
 
     def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None):
         """Propogate input through the network."""

@@ -6,21 +6,22 @@
   },
   "management": {
     "monitor_loss": 1000,
-    "print_samples": 20000
+    "print_samples": 20000,
+	"checkpoint_freq": 2000000
   },
   "data": {
-    "src": "/data/lisatmp4/subramas/datasets/nmt/en-fr/data/europarl-v7.fr-en.tok.true.clean.fr",
-    "trg": "/data/lisatmp4/subramas/datasets/nmt/en-fr/data/europarl-v7.fr-en.tok.true.clean.en",
-    "test_src": "/data/lisatmp4/subramas/datasets/nmt/en-fr/data/newstest2011.fr.true.tok",
-    "test_trg": "/data/lisatmp4/subramas/datasets/nmt/en-fr/data/newstest2011.en.true.tok",
+    "src": "/home/wwt/data/iwslt14/train.de",
+    "trg": "/home/wwt/data/iwslt14/train.en",
+    "test_src": "/home/wwt/data/iwslt14/test.de",
+    "test_trg": "/home/wwt/data/iwslt14/test.en",
     "batch_size": 80,
-    "n_words_trg": 30000,
+    "n_words_trg": 15000,
     "valid_batch_size": 80,
-    "n_words_src": 30000,
+    "n_words_src": 15000,
     "max_src_length": 50,
     "max_trg_length": 50,
     "task": "translation",
-    "save_dir": "/data/lisatmp4/subramas/models/torch_seq2seq",
+    "save_dir": "models",
     "load_dir": false
   },
   "model": {
@@ -34,7 +35,7 @@
     "n_layers_src": 2,
     "n_layers_trg": 1,
     "bidirectional": true,
-    "src_lang": "fr",
+    "src_lang": "de",
     "trg_lang": "en",
     "decode": "greedy",
     "seq2seq": "attention",

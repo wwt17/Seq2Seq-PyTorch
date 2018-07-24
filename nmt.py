@@ -1,9 +1,5 @@
-#!/u/subramas/miniconda2/bin/python
+#!/usr/bin/env python3
 """Main script to run things"""
-import sys
-
-sys.path.append('/u/subramas/Research/nmt-pytorch/')
-
 from data_utils import read_nmt_data, get_minibatch, read_config, hyperparam_string
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
 from evaluate import evaluate_model
@@ -50,7 +46,7 @@ console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
 
-print 'Reading data ...'
+print('Reading data ...')
 
 src, trg = read_nmt_data(
     src=config['data']['src'],
@@ -165,9 +161,9 @@ elif config['training']['optimizer'] == 'sgd':
 else:
     raise NotImplementedError("Learning method not recommend for task")
 
-for i in xrange(1000):
+for i in range(1000):
     losses = []
-    for j in xrange(0, len(src['data']), batch_size):
+    for j in range(0, len(src['data']), batch_size):
 
         input_lines_src, _, lens_src, mask_src = get_minibatch(
             src['data'], src['word2id'], j,
@@ -222,7 +218,7 @@ for i in xrange(1000):
 
         if j % config['management']['checkpoint_freq'] == 0:
 
-            logging.info('Evaluating model ...')
+            logging.info('Evaluating model when j = {} ...'.format(j))
             bleu = evaluate_model(
                 model, src, src_test, trg,
                 trg_test, config, verbose=False,
@@ -240,6 +236,8 @@ for i in xrange(1000):
                     experiment_name + '__epoch_%d__minibatch_%d' % (i, j) + '.model'), 'wb'
                 )
             )
+    
+    print('epoch #{} eval...'.format(i))
 
     bleu = evaluate_model(
         model, src, src_test, trg,

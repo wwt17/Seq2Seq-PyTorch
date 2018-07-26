@@ -2,6 +2,8 @@
 """Main script to run things"""
 from data_utils import read_nmt_data, get_minibatch, read_config, hyperparam_string
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
+from criterions.matrixBLEU import mBLEU
+from utils import onehot_initialization
 from evaluate import evaluate_model
 import math
 import numpy as np
@@ -86,7 +88,8 @@ logging.info('Found %d words in trg ' % (trg_vocab_size))
 
 weight_mask = torch.ones(trg_vocab_size).cuda()
 weight_mask[trg['word2id']['<pad>']] = 0
-loss_criterion = nn.CrossEntropyLoss(weight=weight_mask).cuda()
+criterion_cross_entropy = nn.CrossEntropyLoss(weight=weight_mask).cuda()
+criterion_bleu = mBLEU(4)
 
 if config['model']['seq2seq'] == 'vanilla':
 
@@ -146,7 +149,7 @@ elif config['model']['seq2seq'] == 'fastattention':
 
 if load_dir:
     model.load_state_dict(torch.load(
-        open(load_dir)
+        open(load_dir, 'rb')
     ))
 
 # __TODO__ Make this more flexible for other learning methods.
@@ -161,8 +164,36 @@ elif config['training']['optimizer'] == 'sgd':
 else:
     raise NotImplementedError("Learning method not recommend for task")
 
-for i in range(1000):
-    losses = []
+class LossLogger(object):
+    def __init__(self, names, path):
+        self.names = names
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                names_ = tuple(f.readline().strip().split())
+                assert self.names == names_, "given names: {} prev names: {}".format("\t".join(self.names), "\t".join(names_))
+                self.a = [list(map(float, line.strip().split())) for line in f]
+        else:
+            with open(path, 'w') as f:
+                print('\t'.join(names), file=f)
+            self.a = []
+        self.f = open(path, 'a', 1)
+    def append(self, e):
+        self.a.append(e)
+        print('\t'.join(map(lambda x: "{:.6f}".format(x), e)), file=self.f)
+    def recent(self, k):
+        k = min(k, len(self.a))
+        return list(map(np.mean, zip(*self.a[-k:])))
+    def recent_repr(self, k):
+        v = self.recent(k)
+        return "\t".join("{}: {:.3f}".format(name, val) for name, val in zip(self.names, v))
+
+losses = LossLogger(("loss", "cel", "mbl", "bll"), os.path.join("log", "{}.loss".format(experiment_name)))
+
+bleus = LossLogger(("bleu",), os.path.join("log", "{}.bleu".format(experiment_name)))
+
+pretrain_epochs = config["data"]["pretrain_epochs"]
+
+for i in range(config['data']['last_epoch'], 1000):
     for j in range(0, len(src['data']), batch_size):
 
         input_lines_src, _, lens_src, mask_src = get_minibatch(
@@ -177,19 +208,51 @@ for i in range(1000):
         decoder_logit = model(input_lines_src, input_lines_trg)
         optimizer.zero_grad()
 
-        loss = loss_criterion(
+        X = torch.nn.functional.softmax(decoder_logit, dim=-1)
+        Y = torch.tensor(
+            onehot_initialization(output_lines_trg, trg_vocab_size),
+            dtype=torch.float,
+            device='cuda')
+
+        eos_id = trg['word2id']['</s>']
+        def length_mask(X):
+            l = X.shape[1]
+            mask = [torch.ones(X.shape[0], device='cuda')]
+            for t in range(l):
+                mask.append(mask[-1] * (1 - X[:, t, eos_id]))
+            mask = torch.stack(mask, dim=1)
+            lenX = torch.sum(mask, dim=1)
+            return mask, lenX
+        maskY, lenY = length_mask(Y)
+        maskX, lenX = maskY, lenY
+
+        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device='cuda', verbose=(j % config['management']['print_samples'] == 0))
+        bll = torch.exp(-mbl)
+        mbl = mbl.mean()
+        bll = bll.mean()
+
+        cel = criterion_cross_entropy(
             decoder_logit.contiguous().view(-1, trg_vocab_size),
             output_lines_trg.view(-1)
         )
-        losses.append(loss.data[0])
-        loss.backward()
-        optimizer.step()
 
-        if j % config['management']['monitor_loss'] == 0:
-            logging.info('Epoch : %d Minibatch : %d Loss : %.5f' % (
-                i, j, np.mean(losses))
-            )
-            losses = []
+        bleu_w = config['model']['bleu_w']
+        if bleu_w == 0.:
+            loss = cel
+        elif bleu_w == 1.:
+            loss = mbl
+        else:
+            loss = cel * (1. - bleu_w) + mbl * bleu_w
+        if i < pretrain_epochs:
+            loss = cel
+
+        losses.append(list(map(lambda x: x.data.cpu().numpy(), (loss, cel, mbl, bll))))
+        loss.backward()
+
+        monitor_loss_freq = config['management']['monitor_loss']
+        if j % monitor_loss_freq == 0:
+            logging.info('epoch#{} batch{} {}'.format(
+                i, j, losses.recent_repr(monitor_loss_freq)))
 
         if (
             config['management']['print_samples'] and
@@ -225,7 +288,8 @@ for i in range(1000):
                 metric='bleu',
             )
 
-            logging.info('Epoch : %d Minibatch : %d : BLEU : %.5f ' % (i, j, bleu))
+            bleus.append((bleu,))
+            logging.info('Epoch#%d batch%d BLEU: %.5f' % (i, j, bleu))
 
             logging.info('Saving model ...')
 
@@ -236,6 +300,8 @@ for i in range(1000):
                     experiment_name + '__epoch_%d__minibatch_%d' % (i, j) + '.model'), 'wb'
                 )
             )
+
+        optimizer.step()
     
     print('epoch #{} eval...'.format(i))
 
@@ -245,7 +311,8 @@ for i in range(1000):
         metric='bleu',
     )
 
-    logging.info('Epoch : %d : BLEU : %.5f ' % (i, bleu))
+    bleus.append((bleu,))
+    logging.info('Epoch#%d BLEU: %.5f' % (i, bleu))
 
     torch.save(
         model.state_dict(),

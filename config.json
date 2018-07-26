@@ -7,7 +7,7 @@
   "management": {
     "monitor_loss": 1000,
     "print_samples": 20000,
-	"checkpoint_freq": 2000000
+	"checkpoint_freq": 20000
   },
   "data": {
     "src": "/home/wwt/data/iwslt14/train.de",
@@ -22,7 +22,9 @@
     "max_trg_length": 50,
     "task": "translation",
     "save_dir": "models",
-    "load_dir": false
+    "load_dir": false,
+	"last_epoch": 0,
+	"pretrain_epochs": 5
   },
   "model": {
     "dim": 1000,
@@ -39,6 +41,7 @@
     "trg_lang": "en",
     "decode": "greedy",
     "seq2seq": "attention",
-    "optimizer": "adam"
+    "optimizer": "adam",
+	"bleu_w": 1.0
   }
 }

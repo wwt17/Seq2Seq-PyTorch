@@ -145,7 +145,7 @@ def evaluate_model(
     ground_truths = []
     len_data = len(src_test['data'])
     for j in range(0, len_data, config['data']['batch_size']):
-        print('eval progress: {}/{} = {}'.format(j, len_data, j / len_data))
+        print('eval progress: {}/{} = {:4.1%}'.format(j, len_data, j / len_data))
         if j / len_data > 0.1:
             break
 

@@ -10,10 +10,10 @@
 	"checkpoint_freq": 20000
   },
   "data": {
-    "src": "/home/wwt/data/iwslt14/train.de",
-    "trg": "/home/wwt/data/iwslt14/train.en",
-    "test_src": "/home/wwt/data/iwslt14/test.de",
-    "test_trg": "/home/wwt/data/iwslt14/test.en",
+    "src": "/home/zichaoy/hzt/wwt/data/iwslt14/train.de",
+    "trg": "/home/zichaoy/hzt/wwt/data/iwslt14/train.en",
+    "test_src": "/home/zichaoy/hzt/wwt/data/iwslt14/test.de",
+    "test_trg": "/home/zichaoy/hzt/wwt/data/iwslt14/test.en",
     "batch_size": 80,
     "n_words_trg": 15000,
     "valid_batch_size": 80,
@@ -42,6 +42,6 @@
     "decode": "greedy",
     "seq2seq": "attention",
     "optimizer": "adam",
-	"bleu_w": 1.0
+	"bleu_w": 0.0
   }
 }

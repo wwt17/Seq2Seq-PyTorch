@@ -67,24 +67,25 @@ max_length = config['data']['max_src_length']
 src_vocab_size = len(src['word2id'])
 trg_vocab_size = len(trg['word2id'])
 
-logging.info('Model Parameters : ')
-logging.info('Task : %s ' % (config['data']['task']))
-logging.info('Model : %s ' % (config['model']['seq2seq']))
-logging.info('Source Language : %s ' % (config['model']['src_lang']))
-logging.info('Target Language : %s ' % (config['model']['trg_lang']))
-logging.info('Source Word Embedding Dim  : %s' % (config['model']['dim_word_src']))
-logging.info('Target Word Embedding Dim  : %s' % (config['model']['dim_word_trg']))
-logging.info('Source RNN Hidden Dim  : %s' % (config['model']['dim']))
-logging.info('Target RNN Hidden Dim  : %s' % (config['model']['dim']))
-logging.info('Source RNN Depth : %d ' % (config['model']['n_layers_src']))
-logging.info('Target RNN Depth : %d ' % (1))
-logging.info('Source RNN Bidirectional  : %s' % (config['model']['bidirectional']))
-logging.info('Batch Size : %d ' % (config['model']['n_layers_trg']))
-logging.info('Optimizer : %s ' % (config['training']['optimizer']))
-logging.info('Learning Rate : %f ' % (config['training']['lrate']))
+logging.info('Model Parameters:')
+logging.info('Task: %s' % (config['data']['task']))
+logging.info('Model: %s' % (config['model']['seq2seq']))
+logging.info('Source Language: %s' % (config['model']['src_lang']))
+logging.info('Target Language: %s' % (config['model']['trg_lang']))
+logging.info('Source Word Embedding Dim: %s' % (config['model']['dim_word_src']))
+logging.info('Target Word Embedding Dim: %s' % (config['model']['dim_word_trg']))
+logging.info('Source RNN Hidden Dim: %s' % (config['model']['dim']))
+logging.info('Target RNN Hidden Dim: %s' % (config['model']['dim']))
+logging.info('Source RNN Depth: %d' % (config['model']['n_layers_src']))
+logging.info('Target RNN Depth: %d' % (config['model']['n_layers_trg']))
+logging.info('Source RNN Bidirectional: %s' % (config['model']['bidirectional']))
+logging.info('Batch Size: %d' % (config['data']['batch_size']))
+logging.info('Valid Batch Size: %d' % (config['data']['valid_batch_size']))
+logging.info('Optimizer: %s' % (config['training']['optimizer']))
+logging.info('Learning Rate: %f' % (config['training']['lrate']))
 
-logging.info('Found %d words in src ' % (src_vocab_size))
-logging.info('Found %d words in trg ' % (trg_vocab_size))
+logging.info('Found %d words in src' % (src_vocab_size))
+logging.info('Found %d words in trg' % (trg_vocab_size))
 
 weight_mask = torch.ones(trg_vocab_size).cuda()
 weight_mask[trg['word2id']['<pad>']] = 0
@@ -147,11 +148,6 @@ elif config['model']['seq2seq'] == 'fastattention':
         dropout=0.,
     ).cuda()
 
-if load_dir:
-    model.load_state_dict(torch.load(
-        open(load_dir, 'rb')
-    ))
-
 # __TODO__ Make this more flexible for other learning methods.
 if config['training']['optimizer'] == 'adam':
     lr = config['training']['lrate']
@@ -193,15 +189,21 @@ bleus = LossLogger(("bleu",), os.path.join("log", "{}.bleu".format(experiment_na
 
 pretrain_epochs = config["data"]["pretrain_epochs"]
 
-for i in range(config['data']['last_epoch'], 1000):
-    for j in range(0, len(src['data']), batch_size):
+for epoch_i in range(config['data']['last_epoch'], 1000):
+    if load_dir:
+        logging.info('loading model from {} ...'.format(load_dir))
+        model.load_state_dict(torch.load(load_dir))
 
+    for batch_i in range(0, len(src['data']), batch_size):
+        if batch_i >= 0:
+            break
+        verbose = (batch_i % config['management']['print_samples'] == 0)
         input_lines_src, _, lens_src, mask_src = get_minibatch(
-            src['data'], src['word2id'], j,
+            src['data'], src['word2id'], batch_i,
             batch_size, max_length, add_start=True, add_end=True
         )
         input_lines_trg, output_lines_trg, lens_trg, mask_trg = get_minibatch(
-            trg['data'], trg['word2id'], j,
+            trg['data'], trg['word2id'], batch_i,
             batch_size, max_length, add_start=True, add_end=True
         )
 
@@ -226,9 +228,10 @@ for i in range(config['data']['last_epoch'], 1000):
         maskY, lenY = length_mask(Y)
         maskX, lenX = maskY, lenY
 
-        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device='cuda', verbose=(j % config['management']['print_samples'] == 0))
+        mbl, mbl_ = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device='cuda', verbose=verbose)
         bll = torch.exp(-mbl)
         mbl = mbl.mean()
+        mbl_ = mbl_.mean(0)
         bll = bll.mean()
 
         cel = criterion_cross_entropy(
@@ -243,28 +246,59 @@ for i in range(config['data']['last_epoch'], 1000):
             loss = mbl
         else:
             loss = cel * (1. - bleu_w) + mbl * bleu_w
-        if i < pretrain_epochs:
+        if epoch_i < pretrain_epochs:
             loss = cel
 
         losses.append(list(map(lambda x: x.data.cpu().numpy(), (loss, cel, mbl, bll))))
-        loss.backward()
+
+        X.retain_grad()
+        
+        if verbose:
+            for order in range(1, 5):
+                optimizer.zero_grad()
+                mbl_[order-1].backward(retain_graph=True)
+                g = (X.grad[:, :, :Y.shape[-1]] * Y).sum(-1)
+                print('grad({}):'.format(order))
+                print(g[:5])
+                print('grad({}) argmax:'.format(order))
+                gw = X.grad[:, :, :Y.shape[-1]].min(-1)[1].cpu().numpy()
+                gw = [[trg['id2word'][word_id] for word_id in sent] for sent in gw]
+                for sent in gw[:5]:
+                    print(' '.join(sent))
+
+        optimizer.zero_grad()
+        loss.backward(retain_graph=True)
+        if verbose:
+            t = X.grad[:, :, :Y.shape[-1]]
+            g = (t * Y).sum(-1)
+            print('grad:')
+            print(g[:5])
+            print('grad argmax:')
+            gw = t.min(-1)[1].cpu().numpy()
+            gw = [[trg['id2word'][word_id] for word_id in sent] for sent in gw]
+            for sent in gw[:5]:
+                print(' '.join(sent))
+            w = torch.tensor(onehot_initialization(X.max(-1)[1], trg_vocab_size)[:, :, :Y.shape[-1]], dtype=torch.float, device='cuda')
+            print('grad_:')
+            print((t * w).sum(-1)[:5])
 
         monitor_loss_freq = config['management']['monitor_loss']
-        if j % monitor_loss_freq == 0:
+        if batch_i % monitor_loss_freq == 0:
             logging.info('epoch#{} batch{} {}'.format(
-                i, j, losses.recent_repr(monitor_loss_freq)))
+                epoch_i, batch_i, losses.recent_repr(monitor_loss_freq)))
 
         if (
             config['management']['print_samples'] and
-            j % config['management']['print_samples'] == 0
+            batch_i % config['management']['print_samples'] == 0
         ):
             word_probs = model.decode(
                 decoder_logit
             ).data.cpu().numpy().argmax(axis=-1)
 
             output_lines_trg = output_lines_trg.data.cpu().numpy()
+            samples = min(5, config['data']['batch_size'])
             for sentence_pred, sentence_real in zip(
-                word_probs[:5], output_lines_trg[:5]
+                word_probs[:samples], output_lines_trg[:samples]
             ):
                 sentence_pred = [trg['id2word'][x] for x in sentence_pred]
                 sentence_real = [trg['id2word'][x] for x in sentence_real]
@@ -273,15 +307,17 @@ for i in range(config['data']['last_epoch'], 1000):
                     index = sentence_real.index('</s>')
                     sentence_real = sentence_real[:index]
                     sentence_pred = sentence_pred[:index]
+                #if '</s>' in sentence_pred:
+                #    sentence_pred = sentence_pred[:sentence_pred.index('</s>')]
 
-                logging.info('Predicted : %s ' % (' '.join(sentence_pred)))
+                logging.info('Pred : %s ' % (' '.join(sentence_pred)))
                 logging.info('-----------------------------------------------')
                 logging.info('Real : %s ' % (' '.join(sentence_real)))
                 logging.info('===============================================')
 
-        if j % config['management']['checkpoint_freq'] == 0:
+        if batch_i % config['management']['checkpoint_freq'] == 0:
 
-            logging.info('Evaluating model when j = {} ...'.format(j))
+            logging.info('Evaluating model when batch_i = {} ...'.format(batch_i))
             bleu = evaluate_model(
                 model, src, src_test, trg,
                 trg_test, config, verbose=False,
@@ -289,21 +325,19 @@ for i in range(config['data']['last_epoch'], 1000):
             )
 
             bleus.append((bleu,))
-            logging.info('Epoch#%d batch%d BLEU: %.5f' % (i, j, bleu))
+            logging.info('Epoch#%d batch%d BLEU: %.5f' % (epoch_i, batch_i, bleu))
 
-            logging.info('Saving model ...')
-
-            torch.save(
-                model.state_dict(),
-                open(os.path.join(
+            if save_dir:
+                dir = os.path.join(
                     save_dir,
-                    experiment_name + '__epoch_%d__minibatch_%d' % (i, j) + '.model'), 'wb'
-                )
-            )
+                    experiment_name + '__epoch_%d__minibatch_%d' % (epoch_i, batch_i) + '.model')
+                logging.info('saving model into {} ...'.format(dir))
+                torch.save(model.state_dict(), dir)
+                load_dir = dir
 
         optimizer.step()
     
-    print('epoch #{} eval...'.format(i))
+    print('epoch #{} eval...'.format(epoch_i))
 
     bleu = evaluate_model(
         model, src, src_test, trg,
@@ -312,12 +346,12 @@ for i in range(config['data']['last_epoch'], 1000):
     )
 
     bleus.append((bleu,))
-    logging.info('Epoch#%d BLEU: %.5f' % (i, bleu))
+    logging.info('Epoch#%d BLEU: %.5f' % (epoch_i, bleu))
 
-    torch.save(
-        model.state_dict(),
-        open(os.path.join(
+    if save_dir:
+        dir = os.path.join(
             save_dir,
-            experiment_name + '__epoch_%d' % (i) + '.model'), 'wb'
-        )
-    )
+            experiment_name + '__epoch_%d' % (epoch_i) + '.model')
+        logging.info('saving model into {} ...'.format(dir))
+        torch.save(model.state_dict(), dir)
+        load_dir = dir

@@ -47,10 +47,11 @@ class LossLogger(object):
 
 def run_model(model, batch, target_vocab, device, verbose=False):
     src_sents, tgt_sents = batch['source_text_ids'], batch['target_text_ids']
-    tgt_sents_onehot = torch.tensor(
-        onehot_initialization(tgt_sents[:, 1:], target_vocab.size),
-        dtype=torch.float,
-        device=device)
+    if train_config.enable_bleu:
+        tgt_sents_onehot = torch.tensor(
+            onehot_initialization(tgt_sents[:, 1:], target_vocab.size),
+            dtype=torch.float,
+            device=device)
     src_sents = torch.tensor(src_sents, dtype=torch.long, device=device)
     tgt_sents = torch.tensor(tgt_sents, dtype=torch.long, device=device)
     batch_size = tgt_sents.shape[0]
@@ -59,25 +60,29 @@ def run_model(model, batch, target_vocab, device, verbose=False):
     gen_ids = logits.max(-1)[1]
 
     X = F.softmax(logits, dim=-1)
-    Y = tgt_sents_onehot
 
-    eos_id = target_vocab.eos_token_id
-    def length_mask(X):
-        l = X.shape[1]
-        mask = [torch.ones(X.shape[0], device=device)]
-        for t in range(l):
-            mask.append(mask[-1] * (1 - X[:, t, eos_id]))
-        mask = torch.stack(mask, dim=1)
-        lenX = torch.sum(mask, dim=1)
-        return mask, lenX
-    maskY, lenY = length_mask(Y)
-    if train_config.softlengthmask:
-        maskX, lenX = length_mask(X)
+    if train_config.enable_bleu:
+        Y = tgt_sents_onehot
+
+        eos_id = target_vocab.eos_token_id
+        def length_mask(X):
+            l = X.shape[1]
+            mask = [torch.ones(X.shape[0], device=device)]
+            for t in range(l):
+                mask.append(mask[-1] * (1 - X[:, t, eos_id]))
+            mask = torch.stack(mask, dim=1)
+            lenX = torch.sum(mask, dim=1)
+            return mask, lenX
+        maskY, lenY = length_mask(Y)
+        if train_config.softlengthmask:
+            maskX, lenX = length_mask(X)
+        else:
+            assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
+            maskX, lenX = maskY, lenY
+
+        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device=device, verbose=verbose)[0]
     else:
-        assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
-        maskX, lenX = maskY, lenY
-
-    mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device=device, verbose=verbose)[0]
+        mbl = torch.tensor(0.)
 
     tgt_sents_ = tgt_sents[:, 1:]
     flatten_logits = logits[:, : tgt_sents_.shape[1], :].contiguous().view([-1, logits.shape[-1]])

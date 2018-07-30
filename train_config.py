@@ -1,4 +1,5 @@
 bleuw = 0.0
+enable_bleu = False
 maxorder = 4
 dropout = 0.
 softlengthmask = False

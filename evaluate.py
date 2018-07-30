@@ -13,6 +13,9 @@ import numpy as np
 import subprocess
 import sys
 
+import tensorflow as tf
+from utils import strip_eos
+
 
 def bleu_stats(hypothesis, reference):
     """Compute statistics for BLEU."""
@@ -70,6 +73,27 @@ def get_bleu_moses(hypotheses, reference):
     pipe.stdin.close()
     return pipe.stdout.read()
 
+
+def decode_minibatch_(
+    max_decode_length,
+    model,
+    input_lines_src,
+    input_lines_trg
+):
+    """Decode a minibatch."""
+    for i in range(max_decode_length):
+
+        decoder_logit = model(input_lines_src, input_lines_trg)
+        word_probs = model.decode(decoder_logit)
+        decoder_argmax = word_probs.max(-1)[1]
+        next_preds = decoder_argmax[:, -1]
+
+        input_lines_trg = torch.cat(
+            (input_lines_trg, next_preds.unsqueeze(1)),
+            1
+        )
+
+    return input_lines_trg[:, 1:]
 
 def decode_minibatch(
     config,
@@ -134,6 +158,52 @@ def model_perplexity(
 
     return np.exp(np.mean(losses))
 
+def evaluate_model_(
+    model, sess, feed_dict, data_batch, target_vocab, max_decode_length,
+    eval_batches,
+    print_samples=0
+):
+    """Evaluate model."""
+    gens, tgts = [], []
+    strip_eos_fn = strip_eos(target_vocab.eos_token.encode())
+    for batch_i in range(10000000):
+        try:
+            if batch_i >= eval_batches:
+                break
+
+            batch = sess.run(data_batch, feed_dict=feed_dict)
+            batch_size = batch['target_text_ids'].shape[0]
+
+            print('eval batch #{}'.format(batch_i))
+
+            # Decode a minibatch greedily __TODO__ add beam search decoding
+            gen = decode_minibatch_(
+                max_decode_length, model,
+                torch.LongTensor(batch['source_text_ids']).cuda(),
+                torch.LongTensor(batch['target_text_ids'][:, :1]).cuda()
+            )
+
+            gen = gen.data.cpu().numpy()
+            gen = sess.run(target_vocab.map_ids_to_tokens(gen), feed_dict=feed_dict)
+
+            tgt = batch['target_text'][:, 1:]
+
+            # Process outputs
+            gen, tgt = map(lambda x: x.tolist(), (gen, tgt))
+            gen, tgt = map(strip_eos_fn, (gen, tgt))
+            gens.extend(gen)
+            tgts.extend(tgt)
+        except tf.errors.OutOfRangeError:
+            break
+
+    if print_samples > 0:
+        print("eval samples:")
+        for sent_i, (gen, tgt) in enumerate(zip(gens, tgts)):
+            if sent_i >= print_samples:
+                break
+            print('gen: {}'.format(b' '.join(gen).decode()))
+            print('tgt: {}'.format(b' '.join(tgt).decode()))
+    return get_bleu(gen, tgt)
 
 def evaluate_model(
     model, src, src_test, trg,
@@ -217,6 +287,10 @@ def evaluate_model(
                 print('--------------------------------------')
             ground_truths.append(['<s>'] + sentence_real[:index + 1])
 
+    if False:
+        for pred, gt in zip(preds, ground_truths):
+            print('pred: {}'.format(' '.join(pred)))
+            print('grth: {}'.format(' '.join(gt)))
     return get_bleu(preds, ground_truths)
 
 

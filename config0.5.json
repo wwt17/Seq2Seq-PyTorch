@@ -1,0 +1,47 @@
+{
+  "training": {
+    "optimizer": "adam",
+    "clip_c": 1,
+    "lrate": 0.0001
+  },
+  "management": {
+    "monitor_loss": 1000,
+    "print_samples": 20000,
+	"checkpoint_freq": 20000
+  },
+  "data": {
+    "src": "/home/zichaoy/hzt/wwt/data/iwslt14/train.de",
+    "trg": "/home/zichaoy/hzt/wwt/data/iwslt14/train.en",
+    "test_src": "/home/zichaoy/hzt/wwt/data/iwslt14/test.de",
+    "test_trg": "/home/zichaoy/hzt/wwt/data/iwslt14/test.en",
+    "batch_size": 80,
+    "n_words_trg": 15000,
+    "valid_batch_size": 80,
+    "n_words_src": 15000,
+    "max_src_length": 50,
+    "max_trg_length": 50,
+    "task": "translation",
+    "save_dir": "models",
+    "load_dir": false,
+	"last_epoch": 0,
+	"pretrain_epochs": 5
+  },
+  "model": {
+    "dim": 1000,
+    "dim_trg": 1000,
+    "use_dropout": false,
+    "dim_word_src": 500,
+    "n_words_src": 30000,
+    "n_words": 30000,
+    "dim_word_trg": 500,
+    "n_layers_src": 2,
+    "n_layers_trg": 1,
+    "bidirectional": true,
+    "src_lang": "de",
+    "trg_lang": "en",
+    "decode": "greedy",
+    "seq2seq": "attention",
+    "optimizer": "adam",
+	"bleu_w": 0.5
+  }
+}

@@ -65,7 +65,7 @@ def construct_vocab(lines, vocab_size):
 
     sorted_word2id = sorted(
         vocab.items(),
-        key=operator.itemgetter(1),
+        key=lambda x: (x[1], x[0]),
         reverse=True
     )
 

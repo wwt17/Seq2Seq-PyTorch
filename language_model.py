@@ -57,10 +57,11 @@ def run_model(model, batch, target_vocab, device, verbose=False):
     batch_size = tgt_sents.shape[0]
 
     logits = model(src_sents, tgt_sents[:, :-1])
-    gen_probs, gen_ids = logits.max(-1)
-    X = F.softmax(logits, dim=-1)
+    probs = F.softmax(logits, dim=-1)
+    gen_probs, gen_ids = probs.max(-1)
 
     if train_config.enable_bleu:
+        X = probs
         Y = tgt_sents_onehot
 
         eos_id = target_vocab.eos_token_id
@@ -79,7 +80,7 @@ def run_model(model, batch, target_vocab, device, verbose=False):
             assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
             maskX, lenX = maskY, lenY
 
-        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device=device, verbose=verbose)[0]
+        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device=device, verbose=verbose)[0].mean()
     else:
         mbl = torch.tensor(0.)
 
@@ -89,10 +90,10 @@ def run_model(model, batch, target_vocab, device, verbose=False):
     cel = criterion_cross_entropy(flatten_logits, flatten_tgt_sents)
 
     return {
-        'mbl': mbl.mean(),
+        'mbl': mbl,
         'cel': cel,
         'logits': logits,
-        'probs': X,
+        'probs': probs,
         'gen_probs': gen_probs,
         'gen_ids': gen_ids,
         'X': X,
@@ -190,24 +191,26 @@ if __name__ == '__main__':
                 optimizer.zero_grad()
                 loss.backward()
                 if sample_verbose:
+                    def onehot(x):
+                        return torch.tensor(onehot_initialization(x, target_vocab.size), dtype=torch.float, device=device)
                     samples = min(verbose_config.samples, batch_size)
                     gen_ids = gen_ids[:samples]
                     tgt_ids = batch['target_text_ids'][:samples, 1:]
                     gen_words, tgt_words = map(ids_to_words, (gen_ids, tgt_ids))
-                    gen_grads = probs * onehot_initialization(gen_ids, target_vocab.size).sum(-1)
-                    max_grads, max_ids = gen_probs.grad.max(-1)
-                    max_probs = probs * onehot_initialization(max_ids, target_vocab.size).sum(-1)
+                    gen_grads = (probs.grad * onehot(gen_ids)).sum(-1)
+                    max_grads, max_ids = probs.grad.min(-1)
+                    max_probs = (probs * onehot(max_ids)).sum(-1)
                     max_words = ids_to_words(max_ids)
                     for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
                         l = list(tgt_sent).index(target_vocab.eos_token.encode()) + 1
                         logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode()))
                         logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode()))
                         if verbose_config.probs_verbose:
+                            logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode()))
                             logging.info('gen probs:\n{}'.format(gen_probs[sample_i][:l]))
                             logging.info('gen grads:\n{}'.format(gen_grads[sample_i][:l]))
                             logging.info('max probs:\n{}'.format(max_probs[sample_i][:l]))
                             logging.info('max grads:\n{}'.format(max_grads[sample_i][:l]))
-                            logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode()))
                 losses.append([loss_, cel_, mbl_])
                 step += 1
                 if step % verbose_config.steps_loss == 0:
@@ -275,9 +278,10 @@ if __name__ == '__main__':
                 logging.info('training epoch #{} finished.'.format(epoch))
                 epoch += 1
                 _eval_on_dev_set()
-                ckpt = os.path.join(logdir, 'model.epoch{}'.format(epoch))
-                logging.info('saving model into {} ...'.format(ckpt))
-                torch.save(model.state_dict(), ckpt)
+                if train_config.checkpoints:
+                    ckpt = os.path.join(logdir, 'model.epoch{}'.format(epoch))
+                    logging.info('saving model into {} ...'.format(ckpt))
+                    torch.save(model.state_dict(), ckpt)
 
             logging.info('all training epochs finished.')
 

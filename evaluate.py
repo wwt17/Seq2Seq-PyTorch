@@ -13,6 +13,8 @@ import numpy as np
 import subprocess
 import sys
 
+import logging
+
 import tensorflow as tf
 from utils import strip_eos
 
@@ -197,12 +199,12 @@ def evaluate_model_(
             break
 
     if print_samples > 0:
-        print("eval samples:")
+        logging.info("eval samples:")
         for sent_i, (gen, tgt) in enumerate(zip(gens, tgts)):
             if sent_i >= print_samples:
                 break
-            print('gen: {}'.format(b' '.join(gen).decode()))
-            print('tgt: {}'.format(b' '.join(tgt).decode()))
+            logging.info('gen: {}'.format(b' '.join(gen).decode()))
+            logging.info('tgt: {}'.format(b' '.join(tgt).decode()))
     return get_bleu(gen, tgt)
 
 def evaluate_model(

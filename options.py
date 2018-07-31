@@ -6,7 +6,7 @@ def flag(s):
     return bool(int(s))
 
 def get_data_name(config):
-    return config.training_data_hparams['source_dataset']['vocab_file'].split('/')[-2]
+    return '{}__'.format(config.training_data_hparams['source_dataset']['vocab_file'].split('/')[-2])
 
 def get_model_name(config):
     name = ''
@@ -33,7 +33,7 @@ def get_train_name(config):
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--train_config', type=str, default='train_config')
 argparser.add_argument('--model_config', type=str, default='model_config')
-argparser.add_argument('--data_config', type=str, default='mt_configs')
+argparser.add_argument('--data_config', type=str, default='data_configs')
 argparser.add_argument('--verbose_config', type=str, default='verbose_config')
 argparser.add_argument('--running_mode', type=str, default='train')
 args = argparser.parse_args()

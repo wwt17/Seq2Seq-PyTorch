@@ -57,8 +57,7 @@ def run_model(model, batch, target_vocab, device, verbose=False):
     batch_size = tgt_sents.shape[0]
 
     logits = model(src_sents, tgt_sents[:, :-1])
-    gen_ids = logits.max(-1)[1]
-
+    gen_probs, gen_ids = logits.max(-1)
     X = F.softmax(logits, dim=-1)
 
     if train_config.enable_bleu:
@@ -67,8 +66,8 @@ def run_model(model, batch, target_vocab, device, verbose=False):
         eos_id = target_vocab.eos_token_id
         def length_mask(X):
             l = X.shape[1]
-            mask = [torch.ones(X.shape[0], device=device)]
-            for t in range(l):
+            mask = [torch.ones(X.shape[0], device=device)] * 2
+            for t in range(l-1):
                 mask.append(mask[-1] * (1 - X[:, t, eos_id]))
             mask = torch.stack(mask, dim=1)
             lenX = torch.sum(mask, dim=1)
@@ -94,7 +93,10 @@ def run_model(model, batch, target_vocab, device, verbose=False):
         'cel': cel,
         'logits': logits,
         'probs': X,
+        'gen_probs': gen_probs,
         'gen_ids': gen_ids,
+        'X': X,
+        'Y': Y,
     }
 
 if __name__ == '__main__':
@@ -155,18 +157,20 @@ if __name__ == '__main__':
         data_iterator.switch_to_train_data(sess)
         feed_dict = {tx.global_mode(): tf.estimator.ModeKeys.TRAIN}
         model.train()
-        while True:
+        for batch_i in range(10000000):
             try:
+                if batch_i >= train_config.train_batches:
+                    break
                 batch = sess.run(data_batch, feed_dict=feed_dict)
                 sample_verbose = verbose and (step + 1) % verbose_config.steps_sample == 0
                 batch_size = batch['target_text_ids'].shape[0]
-                optimizer.zero_grad()
                 res = run_model(model, batch, target_vocab,
                                 device=device, verbose=sample_verbose)
                 probs = res['probs']
                 if sample_verbose and verbose_config.probs_verbose:
                     probs.retain_grad()
                 gen_ids = res['gen_ids']
+                gen_probs = res['gen_probs']
                 cel = res['cel']
                 mbl = res['mbl']
                 cel_ = cel.cpu().data.numpy()
@@ -183,19 +187,27 @@ if __name__ == '__main__':
                         logging.info('pretraining')
                     loss = cel
                 loss_ = loss.cpu().data.numpy()
+                optimizer.zero_grad()
                 loss.backward()
                 if sample_verbose:
                     samples = min(verbose_config.samples, batch_size)
                     gen_ids = gen_ids[:samples]
                     tgt_ids = batch['target_text_ids'][:samples, 1:]
                     gen_words, tgt_words = map(ids_to_words, (gen_ids, tgt_ids))
+                    gen_grads = probs * onehot_initialization(gen_ids, target_vocab.size).sum(-1)
+                    max_grads, max_ids = gen_probs.grad.max(-1)
+                    max_probs = probs * onehot_initialization(max_ids, target_vocab.size).sum(-1)
+                    max_words = ids_to_words(max_ids)
                     for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
-                        l = list(tgt_sent).index(target_vocab.eos_token.encode())
-                        logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l+1]).decode()))
-                        logging.info('gen: {}'.format(b' '.join(gen_sent[:l+1]).decode()))
+                        l = list(tgt_sent).index(target_vocab.eos_token.encode()) + 1
+                        logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode()))
+                        logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode()))
                         if verbose_config.probs_verbose:
-                            logging.info('probs.data:\n{}'.format(logits.data[sample_i]))
-                            logging.info('probs.grad:\n{}'.format(logits.grad[sample_i]))
+                            logging.info('gen probs:\n{}'.format(gen_probs[sample_i][:l]))
+                            logging.info('gen grads:\n{}'.format(gen_grads[sample_i][:l]))
+                            logging.info('max probs:\n{}'.format(max_probs[sample_i][:l]))
+                            logging.info('max grads:\n{}'.format(max_grads[sample_i][:l]))
+                            logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode()))
                 losses.append([loss_, cel_, mbl_])
                 step += 1
                 if step % verbose_config.steps_loss == 0:
@@ -212,7 +224,7 @@ if __name__ == '__main__':
             data_iterator.switch_to_val_data(sess)
         feed_dict = {tx.global_mode(): tf.estimator.ModeKeys.PREDICT}
         bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, train_config.maxdecodelength, train_config.eval_batches, verbose_config.eval_print_samples)
-        logging.info("BLEU: {}".format(bleu))
+        logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
         losses.append((bleu,))
 
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1)
@@ -224,14 +236,20 @@ if __name__ == '__main__':
         sess.run(tf.local_variables_initializer())
         sess.run(tf.tables_initializer())
 
-        ckpts = list(filter(lambda s: s.startswith("model.epoch"), os.listdir(logdir)))
-        if len(ckpts) == 0:
-            epoch = 0
-        else:
-            epoch = max(map(lambda s: int(s[len('model.epoch'):]), ckpts))
+        def _load_model(epoch):
             ckpt = os.path.join(logdir, "model.epoch{}".format(epoch))
             logging.info('loading model from {} ...'.format(ckpt))
             model.load_state_dict(torch.load(ckpt))
+        if train_config.start_epoch is None:
+            ckpts = list(filter(lambda s: s.startswith("model.epoch"), os.listdir(logdir)))
+            if len(ckpts) == 0:
+                epoch = 0
+            else:
+                epoch = max(map(lambda s: int(s[len('model.epoch'):]), ckpts))
+                _load_model(epoch)
+        else:
+            epoch = train_config.start_epoch
+            _load_model(epoch)
 
         if args.running_mode == 'train':
             optimizer = optim.Adam(model.parameters(), lr=train_config.lr)
@@ -255,8 +273,8 @@ if __name__ == '__main__':
                 logging.info('training epoch #{}:'.format(epoch))
                 _train_epoch(sess, model, optimizer, epoch < train_config.pretrain, train_losses)
                 logging.info('training epoch #{} finished.'.format(epoch))
-                _eval_on_dev_set()
                 epoch += 1
+                _eval_on_dev_set()
                 ckpt = os.path.join(logdir, 'model.epoch{}'.format(epoch))
                 logging.info('saving model into {} ...'.format(ckpt))
                 torch.save(model.state_dict(), ckpt)

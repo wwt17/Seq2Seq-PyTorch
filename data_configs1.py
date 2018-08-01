@@ -1,7 +1,7 @@
 training_data_hparams = {
     'shuffle': False,
     'num_epochs': 1,
-    'batch_size': 5,
+    'batch_size': 80,
     'allow_smaller_final_batch': False,
     'source_dataset': {
         "files": ['data/iwslt14/train.de'],

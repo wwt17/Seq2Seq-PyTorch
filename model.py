@@ -847,19 +847,10 @@ class Seq2SeqAttention(nn.Module):
             ctx_mask,
             beam,
             max_decode_length,
-            lambda hidden: self.trg_embedding(self.decoder2vocab(hidden.unsqueeze(0)).max(-1)[1]).squeeze(0)
+            lambda hidden: self.trg_embedding(self.decoder2vocab(hidden).max(-1)[1])
         )
 
-        trg_h_reshape = trg_h.contiguous().view(
-            trg_h.size()[0] * trg_h.size()[1],
-            trg_h.size()[2]
-        )
-        decoder_logit = self.decoder2vocab(trg_h_reshape)
-        decoder_logit = decoder_logit.view(
-            trg_h.size()[0],
-            trg_h.size()[1],
-            decoder_logit.size()[1]
-        )
+        decoder_logit = self.decoder2vocab(trg_h)
         return decoder_logit
 
     def decode(self, logits):

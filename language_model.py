@@ -80,7 +80,8 @@ def run_model(model, batch, target_vocab, device, verbose=False):
             assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
             maskX, lenX = maskY, lenY
 
-        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX, device=device, verbose=verbose)[0].mean()
+        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX,
+            recall_w=train_config.recall_w, device=device, verbose=verbose)
     else:
         mbl = torch.tensor(0.)
 

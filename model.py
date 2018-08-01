@@ -352,7 +352,7 @@ class LSTMAttentionDot(nn.Module):
 
         self.attention_layer = SoftDotAttention(hidden_size)
 
-    def forward(self, input, hidden, ctx, ctx_mask=None):
+    def forward(self, input, hidden, ctx, ctx_mask=None, beam=None, max_decode_steps=None, get_next=None):
         """Propogate input through the network."""
         def recurrence(input, hidden):
             """Recurrence helper."""
@@ -376,12 +376,16 @@ class LSTMAttentionDot(nn.Module):
             input = input.transpose(0, 1)
 
         output = []
-        steps = range(input.size(0))
-        for i in steps:
-            hidden = recurrence(input[i], hidden)
-            output.append(hidden[0] if isinstance(hidden, tuple) else hidden)
+        if max_decode_steps is None:
+            max_decode_steps = input.size(0)
+        def get_vec(hidden):
+            return hidden[0] if isinstance(hidden, tuple) else hidden
+        for step in range(max_decode_steps):
+            inp = (input[step] if (beam is None or step == 0) else get_next(get_vec(hidden)))
+            hidden = recurrence(inp, hidden)
+            output.append(get_vec(hidden))
 
-        output = torch.cat(output, 0).view(input.size(0), *output[0].size())
+        output = torch.stack(output, 0)
 
         if self.batch_first:
             output = output.transpose(0, 1)
@@ -815,7 +819,7 @@ class Seq2SeqAttention(nn.Module):
 
         return h0_encoder, c0_encoder
 
-    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None):
+    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None, beam=None, max_decode_length=None):
         """Propogate input through the network."""
         src_emb = self.src_embedding(input_src)
         trg_emb = self.trg_embedding(input_trg)
@@ -840,7 +844,10 @@ class Seq2SeqAttention(nn.Module):
             trg_emb,
             (decoder_init_state, c_t),
             ctx,
-            ctx_mask
+            ctx_mask,
+            beam,
+            max_decode_length,
+            lambda hidden: self.trg_embedding(self.decoder2vocab(hidden.unsqueeze(0)).max(-1)[1]).squeeze(0)
         )
 
         trg_h_reshape = trg_h.contiguous().view(

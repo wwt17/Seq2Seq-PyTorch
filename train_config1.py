@@ -6,7 +6,7 @@ softlengthmask = False
 maxdecodelength = 50
 
 optimizer = "adam"
-lr = 0.0001
+lr = 0.001
 
 pretrain = 8
 
@@ -16,10 +16,10 @@ load_dir = None
 
 start_epoch = 8
 max_epochs = 1000
-train_batches = 10000000
-eval_batches = 10
+train_batches = 1
+eval_batches = 1
 
 if bleuw != 0:
     assert enable_bleu
 
-checkpoints = True
+checkpoints = False

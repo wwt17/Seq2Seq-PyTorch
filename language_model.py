@@ -71,7 +71,7 @@ def run_model(model, batch, target_vocab, device, verbose=False):
             for t in range(l-1):
                 mask.append(mask[-1] * (1 - X[:, t, eos_id]))
             mask = torch.stack(mask, dim=1)
-            lenX = torch.sum(mask, dim=1)
+            lenX = torch.sum(mask, dim=1) - 1
             return mask, lenX
         maskY, lenY = length_mask(Y)
         if train_config.softlengthmask:
@@ -89,16 +89,20 @@ def run_model(model, batch, target_vocab, device, verbose=False):
     flatten_tgt_sents = tgt_sents_.contiguous().view([-1])
     cel = criterion_cross_entropy(flatten_logits, flatten_tgt_sents)
 
-    return {
+    ret = {
         'mbl': mbl,
         'cel': cel,
         'logits': logits,
         'probs': probs,
         'gen_probs': gen_probs,
         'gen_ids': gen_ids,
-        'X': X,
-        'Y': Y,
     }
+    if train_config.enable_bleu:
+        ret.update({
+            'X': X,
+            'Y': Y,
+        })
+    return ret
 
 if __name__ == '__main__':
     logging.root.handlers = []
@@ -194,14 +198,16 @@ if __name__ == '__main__':
                     def onehot(x):
                         return torch.tensor(onehot_initialization(x, target_vocab.size), dtype=torch.float, device=device)
                     samples = min(verbose_config.samples, batch_size)
-                    gen_ids = gen_ids[:samples]
-                    tgt_ids = batch['target_text_ids'][:samples, 1:]
+                    tgt_ids = batch['target_text_ids'][:, 1:]
                     gen_words, tgt_words = map(ids_to_words, (gen_ids, tgt_ids))
-                    gen_grads = (probs.grad * onehot(gen_ids)).sum(-1)
-                    max_grads, max_ids = probs.grad.min(-1)
-                    max_probs = (probs * onehot(max_ids)).sum(-1)
-                    max_words = ids_to_words(max_ids)
+                    if verbose_config.probs_verbose:
+                        gen_grads = (probs.grad * onehot(gen_ids)).sum(-1)
+                        max_grads, max_ids = probs.grad.min(-1)
+                        max_probs = (probs * onehot(max_ids)).sum(-1)
+                        max_words = ids_to_words(max_ids)
                     for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
+                        if sample_i >= samples:
+                            break
                         l = list(tgt_sent).index(target_vocab.eos_token.encode()) + 1
                         logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode()))
                         logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode()))

@@ -79,23 +79,11 @@ def get_bleu_moses(hypotheses, reference):
 def decode_minibatch_(
     max_decode_length,
     model,
-    input_lines_src,
-    input_lines_trg
+    src,
+    tgt_initial,
 ):
     """Decode a minibatch."""
-    for i in range(max_decode_length):
-
-        decoder_logit = model(input_lines_src, input_lines_trg)
-        word_probs = model.decode(decoder_logit)
-        decoder_argmax = word_probs.max(-1)[1]
-        next_preds = decoder_argmax[:, -1]
-
-        input_lines_trg = torch.cat(
-            (input_lines_trg, next_preds.unsqueeze(1)),
-            1
-        )
-
-    return input_lines_trg[:, 1:]
+    return model(src, tgt_initial, beam=1, max_decode_length=max_decode_length).max(-1)[1]
 
 def decode_minibatch(
     config,
@@ -205,7 +193,7 @@ def evaluate_model_(
                 break
             logging.info('gen: {}'.format(b' '.join(gen).decode()))
             logging.info('tgt: {}'.format(b' '.join(tgt).decode()))
-    return get_bleu(gen, tgt)
+    return get_bleu(gens, tgts)
 
 def evaluate_model(
     model, src, src_test, trg,

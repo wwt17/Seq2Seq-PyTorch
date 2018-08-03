@@ -42,11 +42,11 @@ class mBLEU(nn.Module):
             matchYY = YY[:, : sizeY - order + 1, : sizeY - order + 1] * matchYY[:, 1:, 1:]
             cntXY = matchXY.sum(2)
             cntXX = matchXX.sum(2)
-            o_order_X = torch.min(one - 0.00, cntXY / torch.max(one, cntXX))
-            #o_order = torch.min(one - 0.05, torch.min(cntX, cntY) / torch.max(one, torch.max(cntX, cntY)))
+            o_order_X = torch.tanh(cntXY / torch.max(one, cntXX))
+            #o_order_X = torch.min(one - 0.00, torch.min(cntXX, cntXY) / torch.max(one, torch.max(cntXX, cntXY)))
             cntYX = matchXY.sum(1)
             cntYY = matchYY.sum(2)
-            o_order_Y = torch.min(one - 0.00, cntYX / torch.max(one, cntYY))
+            o_order_Y = torch.tanh(cntYX / torch.max(one, cntYY))
             if verbose:
                 cntXY_.append(cntXY)
                 cntXX_.append(cntXX)
@@ -77,10 +77,13 @@ class mBLEU(nn.Module):
 
         w = torch.tensor([0.1, 0.3, 0.3, 0.3], device=device)
         log_o_X_ = torch.log(o_X_ + 1e-9)
-        log_geomean_X = log_o_X_ * w
+        log_o_X_weighted = log_o_X_ * w
+        log_geomean_X = log_o_X_weighted.sum(1)
         log_o_Y_ = torch.log(o_Y_ + 1e-9)
-        log_geomean_Y = log_o_Y_ * w
+        log_o_Y_weighted = log_o_Y_ * w
+        log_geomean_Y = log_o_Y_weighted.sum(1)
         #log_bp = torch.min(zero, one - lenY / lenX)
         #log_bleu = log_bp + log_geomean
         #log_bleu = log_bp + log_o.sum(1)#
-        return - ((1. - recall_w) * log_geomean_X + recall_w * log_geomean_Y).sum()
+        return - ((1. - recall_w) * log_geomean_X + recall_w * log_geomean_Y).sum(), \
+               - ((1. - recall_w) * log_o_X_weighted + recall_w * log_o_Y_weighted).sum(0)

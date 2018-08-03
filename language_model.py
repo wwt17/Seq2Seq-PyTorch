@@ -16,11 +16,12 @@ from criterions.matrixBLEU import mBLEU
 from utils import strip_eos, onehot_initialization, find_valid_length
 from evaluate import evaluate_model_
 
-seed = train_config.seed
-tf.set_random_seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
+if False:
+    seed = train_config.seed
+    tf.set_random_seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
 
 class LossLogger(object):
     def __init__(self, names, path):
@@ -47,20 +48,44 @@ class LossLogger(object):
 
 def run_model(model, batch, target_vocab, device, verbose=False):
     src_sents, tgt_sents = batch['source_text_ids'], batch['target_text_ids']
-    if train_config.enable_bleu:
-        tgt_sents_onehot = torch.tensor(
-            onehot_initialization(tgt_sents[:, 1:], target_vocab.size),
-            dtype=torch.float,
-            device=device)
+    tgt_sents_onehot = torch.tensor(
+        onehot_initialization(tgt_sents, target_vocab.size),
+        dtype=torch.float,
+        device=device)
     src_sents = torch.tensor(src_sents, dtype=torch.long, device=device)
     tgt_sents = torch.tensor(tgt_sents, dtype=torch.long, device=device)
     batch_size = tgt_sents.shape[0]
 
-    logits = model(src_sents, tgt_sents[:, :-1])
-    probs = F.softmax(logits, dim=-1)
-    gen_probs, gen_ids = probs.max(-1)
+    ret = {
+        'src_sents': src_sents,
+        'tgt_sents': tgt_sents,
+        'tgt_sents_onehot': tgt_sents_onehot,
+    }
+
+    if train_config.enable_cross_entropy:
+        logits_ce = model(src_sents, tgt_sents[:, :-1])
+
+        tgt_sents_ = tgt_sents[:, 1:]
+        flatten_logits_ce = logits_ce.contiguous().view(-1, logits_ce.shape[-1])
+        flatten_tgt_sents_ = tgt_sents_.contiguous().view(-1)
+        cel = criterion_cross_entropy(flatten_logits_ce, flatten_tgt_sents_)
+
+        ret['ce'] = {
+            'logits': logits_ce,
+            'loss': cel,
+        }
 
     if train_config.enable_bleu:
+        if train_config.mode == "greedy":
+            logits_mb = model(src_sents, tgt_sents[:, :1], beam=1, max_decode_length=tgt_sents_onehot.shape[1]-1)
+        if train_config.mode == "soft":
+            logits_mb = model(src_sents, tgt_sents[:, :1], beam=0, max_decode_length=tgt_sents_onehot.shape[1]-1)
+        else:
+            raise NotImplementedError("train_config.mode {} is not implemented".format(train_config.mode))
+        probs = F.softmax(logits_mb, dim=-1)
+        probs = torch.cat([tgt_sents_onehot[:, :1], probs], dim=1)
+        gen_probs, gen_ids = probs.max(-1)
+
         X = probs
         Y = tgt_sents_onehot
 
@@ -80,29 +105,30 @@ def run_model(model, batch, target_vocab, device, verbose=False):
             assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
             maskX, lenX = maskY, lenY
 
-        mbl = criterion_bleu(Y, X, lenY, lenX, maskY, maskX,
+        mbl, mbls_ = criterion_bleu(Y, X, lenY, lenX, maskY, maskX,
             recall_w=train_config.recall_w, device=device, verbose=verbose)
-    else:
-        mbl = torch.tensor(0.)
 
-    tgt_sents_ = tgt_sents[:, 1:]
-    flatten_logits = logits[:, : tgt_sents_.shape[1], :].contiguous().view([-1, logits.shape[-1]])
-    flatten_tgt_sents = tgt_sents_.contiguous().view([-1])
-    cel = criterion_cross_entropy(flatten_logits, flatten_tgt_sents)
-
-    ret = {
-        'mbl': mbl,
-        'cel': cel,
-        'logits': logits,
-        'probs': probs,
-        'gen_probs': gen_probs,
-        'gen_ids': gen_ids,
-    }
-    if train_config.enable_bleu:
-        ret.update({
+        ret['mb'] = {
+            'logits': logits_mb,
+            'probs': probs,
+            'gen_probs': gen_probs,
+            'gen_ids': gen_ids,
+            'loss': mbl,
+            'mbls_': mbls_,
             'X': X,
             'Y': Y,
-        })
+        }
+
+    bleuw = train_config.bleuw
+    if bleuw == 0.:
+        loss = cel
+    elif bleuw == 1.:
+        loss = mbl
+    else:
+        loss = (1. - bleuw) * cel + bleuw * mbl
+
+    ret['loss'] = loss
+
     return ret
 
 if __name__ == '__main__':
@@ -172,40 +198,53 @@ if __name__ == '__main__':
                 batch_size = batch['target_text_ids'].shape[0]
                 res = run_model(model, batch, target_vocab,
                                 device=device, verbose=sample_verbose)
-                probs = res['probs']
-                if sample_verbose and verbose_config.probs_verbose:
-                    probs.retain_grad()
-                gen_ids = res['gen_ids']
-                gen_probs = res['gen_probs']
-                cel = res['cel']
-                mbl = res['mbl']
-                cel_ = cel.cpu().data.numpy()
-                mbl_ = mbl.cpu().data.numpy()
-                bleuw = train_config.bleuw
-                if bleuw == 1.:
-                    loss = mbl
-                elif bleuw == 0.:
-                    loss = cel
+                if train_config.enable_cross_entropy:
+                    cel = res['ce']['loss']
+                    cel_ = cel.cpu().data.numpy()
                 else:
-                    loss = cel * (1. - bleuw) + mbl * bleuw
+                    cel_ = -1.
+                if train_config.enable_bleu:
+                    probs = res['mb']['probs']
+                    if sample_verbose and verbose_config.probs_verbose:
+                        probs.retain_grad()
+                    gen_ids = res['mb']['gen_ids']
+                    gen_probs = res['mb']['gen_probs']
+                    mbl = res['mb']['loss']
+                    mbl_ = mbl.cpu().data.numpy()
+                else:
+                    mbl_ = -1.
+                loss = res['loss']
                 if pretrain:
                     if sample_verbose:
                         logging.info('pretraining')
                     loss = cel
                 loss_ = loss.cpu().data.numpy()
+
+                if train_config.enable_bleu and sample_verbose and verbose_config.probs_verbose:
+                    mbls_ = res['mb']['mbls_']
+                    grad_ = []
+                    for order in range(1, criterion_bleu.max_order + 1):
+                        optimizer.zero_grad()
+                        mbls_[order-1].backward(retain_graph=True)
+                        grad_.append(probs.grad)
+                    grad_ = torch.stack(grad_, dim=1)
+
                 optimizer.zero_grad()
                 loss.backward()
-                if sample_verbose:
+
+                if train_config.enable_bleu and sample_verbose:
                     def onehot(x):
                         return torch.tensor(onehot_initialization(x, target_vocab.size), dtype=torch.float, device=device)
                     samples = min(verbose_config.samples, batch_size)
-                    tgt_ids = batch['target_text_ids'][:, 1:]
+                    tgt_ids = batch['target_text_ids']
                     gen_words, tgt_words = map(ids_to_words, (gen_ids, tgt_ids))
                     if verbose_config.probs_verbose:
                         gen_grads = (probs.grad * onehot(gen_ids)).sum(-1)
                         max_grads, max_ids = probs.grad.min(-1)
                         max_probs = (probs * onehot(max_ids)).sum(-1)
                         max_words = ids_to_words(max_ids)
+                        max_grad_, max_id_ = grad_.min(-1)
+                        max_word_ = ids_to_words(max_id_)
                     for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
                         if sample_i >= samples:
                             break
@@ -218,12 +257,20 @@ if __name__ == '__main__':
                             logging.info('gen grads:\n{}'.format(gen_grads[sample_i][:l]))
                             logging.info('max probs:\n{}'.format(max_probs[sample_i][:l]))
                             logging.info('max grads:\n{}'.format(max_grads[sample_i][:l]))
+                            for order in range(1, criterion_bleu.max_order + 1):
+                                logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode()))
+                                logging.info('{}-gram max grads:\n{}'.format(order, max_grad_[sample_i][order-1][:l]))
                 losses.append([loss_, cel_, mbl_])
                 step += 1
                 if step % verbose_config.steps_loss == 0:
                     logging.info('step: {}\tloss: {:.3f}\tcel: {:.3f}\tmbl: {:.3f}'.format(
                         step, loss_, cel_, mbl_))
+
                 optimizer.step()
+
+                if step % verbose_config.steps_eval == 0:
+                    _eval_on_dev_set()
+
             except tf.errors.OutOfRangeError:
                 break
 
@@ -236,6 +283,16 @@ if __name__ == '__main__':
         bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, train_config.maxdecodelength, train_config.eval_batches, verbose_config.eval_print_samples)
         logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
         losses.append((bleu,))
+
+    def _eval_on_dev_set():
+        logging.info('evaluating on dev test...')
+        _test_decode(
+            sess,
+            model,
+            'dev',
+            os.path.join(logdir, 'dev.epoch{}'.format(epoch)),
+            eval_losses,
+            device)
 
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1)
     sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
@@ -266,16 +323,6 @@ if __name__ == '__main__':
 
             train_losses = LossLogger(("loss", "cel", "mbl"), os.path.join(logdir, "train_loss"))
             eval_losses = LossLogger(("bleu",), os.path.join(logdir, "eval_loss"))
-
-            def _eval_on_dev_set():
-                logging.info('evaluating on dev test...')
-                _test_decode(
-                    sess,
-                    model,
-                    'dev',
-                    os.path.join(logdir, 'dev.epoch{}'.format(epoch)),
-                    eval_losses,
-                    device)
 
             _eval_on_dev_set()
 

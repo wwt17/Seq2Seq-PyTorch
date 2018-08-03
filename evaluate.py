@@ -191,8 +191,8 @@ def evaluate_model_(
         for sent_i, (gen, tgt) in enumerate(zip(gens, tgts)):
             if sent_i >= print_samples:
                 break
-            logging.info('gen: {}'.format(b' '.join(gen).decode()))
             logging.info('tgt: {}'.format(b' '.join(tgt).decode()))
+            logging.info('gen: {}'.format(b' '.join(gen).decode()))
     return get_bleu(gens, tgts)
 
 def evaluate_model(

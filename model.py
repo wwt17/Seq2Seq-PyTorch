@@ -847,7 +847,9 @@ class Seq2SeqAttention(nn.Module):
             ctx_mask,
             beam,
             max_decode_length,
-            lambda hidden: self.trg_embedding(self.decoder2vocab(hidden).max(-1)[1])
+            (lambda hidden: self.trg_embedding(self.decoder2vocab(hidden).max(-1)[1]))
+            if beam is None or beam > 0 else
+            (lambda hidden: torch.mm(F.softmax(self.decoder2vocab(hidden), -1), self.trg_embedding.weight)),
         )
 
         decoder_logit = self.decoder2vocab(trg_h)

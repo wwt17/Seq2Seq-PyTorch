@@ -1,9 +1,7 @@
 import numpy as np
 import torch
 import random
-from matplotlib import pyplot as plt
 from torch.autograd import Variable
-plt.switch_backend('agg')
 
 def strip_eos(eos_token):
     return lambda sents: [sent[:sent.index(eos_token)]

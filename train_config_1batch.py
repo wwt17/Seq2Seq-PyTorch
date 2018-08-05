@@ -1,7 +1,8 @@
 mode = 'soft'
 bleuw = 1.0
+enable_cross_entropy = False
 enable_bleu = True
-recall_w = 0.0
+recall_w = 0.5
 maxorder = 4
 dropout = 0.
 softlengthmask = False

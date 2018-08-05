@@ -5,7 +5,7 @@ from torch.autograd import Variable
 import math
 import torch.nn.functional as F
 import numpy as np
-
+import random
 
 class StackedAttentionLSTM(nn.Module):
     """Deep Attention LSTM."""
@@ -352,7 +352,7 @@ class LSTMAttentionDot(nn.Module):
 
         self.attention_layer = SoftDotAttention(hidden_size)
 
-    def forward(self, input, hidden, ctx, ctx_mask=None, beam=None, max_decode_steps=None, get_next=None):
+    def forward(self, input, hidden, ctx, ctx_mask=None, out_layer=None, max_decode_steps=None, beam=None, get_next=None):
         """Propogate input through the network."""
         def recurrence(input, hidden):
             """Recurrence helper."""
@@ -378,18 +378,15 @@ class LSTMAttentionDot(nn.Module):
         output = []
         if max_decode_steps is None:
             max_decode_steps = input.size(0)
-        def get_vec(hidden):
-            return hidden[0] if isinstance(hidden, tuple) else hidden
+        def hidden_to_out(hidden):
+            return out_layer(hidden[0] if isinstance(hidden, tuple) else hidden)
+        out = hidden_to_out(hidden)
         for step in range(max_decode_steps):
-            inp = (input[step] if (beam is None or step == 0) else get_next(get_vec(hidden)))
-            hidden = recurrence(inp, hidden)
-            output.append(get_vec(hidden))
+            hidden = recurrence(get_next(out, input, step) if step > 0 else input[step], hidden)
+            out = hidden_to_out(hidden)
+            output.append(out)
 
-        output = torch.stack(output, 0)
-
-        if self.batch_first:
-            output = output.transpose(0, 1)
-
+        output = torch.stack(output, 1 if self.batch_first else 0)
         return output, hidden
 
 
@@ -819,7 +816,7 @@ class Seq2SeqAttention(nn.Module):
 
         return h0_encoder, c0_encoder
 
-    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None, beam=None, max_decode_length=None):
+    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None, max_decode_length=None, beam=None, teach_rate=0.):
         """Propogate input through the network."""
         src_emb = self.src_embedding(input_src)
         trg_emb = self.trg_embedding(input_trg)
@@ -840,20 +837,24 @@ class Seq2SeqAttention(nn.Module):
 
         ctx = src_h.transpose(0, 1)
 
-        trg_h, (_, _) = self.decoder(
+        if beam is None:
+            get_next = lambda logit, tgt, step: tgt[step]
+        elif beam == 0:
+            get_next = lambda logit, tgt, step: (tgt[step] if random.random() < teach_rate else torch.mm(F.softmax(logit, -1), self.trg_embedding.weight))
+        elif beam > 0:
+            get_next = lambda logit, tgt, step: (tgt[step] if random.random() < teach_rate else self.trg_embedding(logit.max(-1)[1]))
+        logits, (_, _) = self.decoder(
             trg_emb,
             (decoder_init_state, c_t),
             ctx,
             ctx_mask,
-            beam,
+            self.decoder2vocab,
             max_decode_length,
-            (lambda hidden: self.trg_embedding(self.decoder2vocab(hidden).max(-1)[1]))
-            if beam is None or beam > 0 else
-            (lambda hidden: torch.mm(F.softmax(self.decoder2vocab(hidden), -1), self.trg_embedding.weight)),
+            beam,
+            get_next,
         )
 
-        decoder_logit = self.decoder2vocab(trg_h)
-        return decoder_logit
+        return logits
 
     def decode(self, logits):
         """Return probability distribution over words."""

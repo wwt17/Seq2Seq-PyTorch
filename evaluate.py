@@ -80,10 +80,10 @@ def decode_minibatch_(
     max_decode_length,
     model,
     src,
-    tgt_initial,
+    tgt,
 ):
     """Decode a minibatch."""
-    return model(src, tgt_initial, beam=1, max_decode_length=max_decode_length).max(-1)[1]
+    return model(src, tgt, max_decode_length=max_decode_length, beam=1).max(-1)[1]
 
 def decode_minibatch(
     config,
@@ -156,11 +156,8 @@ def evaluate_model_(
     """Evaluate model."""
     gens, tgts = [], []
     strip_eos_fn = strip_eos(target_vocab.eos_token.encode())
-    for batch_i in range(10000000):
+    for batch_i in range(eval_batches):
         try:
-            if batch_i >= eval_batches:
-                break
-
             batch = sess.run(data_batch, feed_dict=feed_dict)
             batch_size = batch['target_text_ids'].shape[0]
 

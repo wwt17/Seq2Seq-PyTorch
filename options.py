@@ -24,9 +24,11 @@ def get_train_name(config):
     name += 'maxorder_{}__'.format(config.maxorder)
     name += 'dropout_{}__'.format(config.dropout)
     name += 'softlengthmask_{}__'.format(config.softlengthmask)
-    name += 'maxdecodelength_{}__'.format(config.maxdecodelength)
+    name += 'max_decode_length_{}__'.format(config.max_decode_length)
     name += 'lr_{}__'.format(config.lr)
     name += 'pretrain_{}__'.format(config.pretrain)
+    if config.enable_bleu:
+        name += 'teach_anneal_{}_{}_{}__'.format(config.initial_teach_rate, config.teach_rate_anneal, config.teach_rate_anneal_steps)
     name += 'seed_{}__'.format(config.seed)
     return name
 

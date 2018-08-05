@@ -1,11 +1,12 @@
-bleuw = 0.0
+mode = 'soft'
+bleuw = 0.005
 enable_cross_entropy = True
-enable_bleu = False
+enable_bleu = True
 recall_w = 0.0
 maxorder = 4
 dropout = 0.
 softlengthmask = False
-max_decode_length = 50
+maxdecodelength = 50
 
 optimizer = "adam"
 lr = 1e-4

@@ -1,11 +1,14 @@
-bleuw = 0.0
+initial_teach_rate = 1.0
+teach_rate_anneal = 0.90
+mode = 'soft'
+bleuw = 1.
 enable_cross_entropy = True
-enable_bleu = False
-recall_w = 0.0
+enable_bleu = True
+recall_w = 0.5
 maxorder = 4
 dropout = 0.
-softlengthmask = False
-max_decode_length = 50
+softlengthmask = True
+max_decode_length = None
 
 optimizer = "adam"
 lr = 1e-4
@@ -19,7 +22,6 @@ load_dir = None
 start_epoch = 22
 max_epochs = 1000
 train_batches = 10000000
-eval_batches = 10000000
 
 if bleuw != 0:
     assert enable_bleu

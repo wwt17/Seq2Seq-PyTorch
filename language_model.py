@@ -46,7 +46,7 @@ class LossLogger(object):
         v = self.recent(k)
         return "\t".join("{}: {:.3f}".format(name, val) for name, val in zip(self.names, v))
 
-def run_model(model, batch, target_vocab, device, verbose=False):
+def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     src_sents, tgt_sents = batch['source_text_ids'], batch['target_text_ids']
     tgt_sents_onehot = torch.tensor(
         onehot_initialization(tgt_sents, target_vocab.size),
@@ -77,11 +77,18 @@ def run_model(model, batch, target_vocab, device, verbose=False):
 
     if train_config.enable_bleu:
         if train_config.mode == "greedy":
-            logits_mb = model(src_sents, tgt_sents[:, :1], beam=1, max_decode_length=tgt_sents_onehot.shape[1]-1)
-        if train_config.mode == "soft":
-            logits_mb = model(src_sents, tgt_sents[:, :1], beam=0, max_decode_length=tgt_sents_onehot.shape[1]-1)
+            beam = 1
+        elif train_config.mode == "soft":
+            beam = 0
         else:
             raise NotImplementedError("train_config.mode {} is not implemented".format(train_config.mode))
+        logits_mb = model(
+            src_sents,
+            tgt_sents[:, :-1],
+            max_decode_length=train_config.max_decode_length,
+            beam=beam,
+            teach_rate=teach_rate)
+
         probs = F.softmax(logits_mb, dim=-1)
         probs = torch.cat([tgt_sents_onehot[:, :1], probs], dim=1)
         gen_probs, gen_ids = probs.max(-1)
@@ -152,8 +159,11 @@ if __name__ == '__main__':
     training_data = tx.data.PairedTextData(hparams=data_config.training_data_hparams)
     valid_data = tx.data.PairedTextData(hparams=data_config.valid_data_hparams)
     test_data = tx.data.PairedTextData(hparams=data_config.test_data_hparams)
-    data_iterator = tx.data.TrainTestDataIterator(
-        train=training_data, val=valid_data, test=test_data)
+    data_iterator = tx.data.FeedableDataIterator({
+        'train': training_data,
+        'val': valid_data,
+        'test': test_data,
+    })
     data_batch = data_iterator.get_next()
 
     source_vocab = training_data.source_vocab
@@ -183,20 +193,19 @@ if __name__ == '__main__':
     step = 0
 
     def _train_epoch(sess, model, optimizer, pretrain, losses, verbose=verbose_config.verbose):
+        global teach_rate
         def ids_to_words(ids):
             return sess.run(target_vocab.map_ids_to_tokens(ids), feed_dict=feed_dict)
         global step
-        data_iterator.switch_to_train_data(sess)
-        feed_dict = {tx.global_mode(): tf.estimator.ModeKeys.TRAIN}
+        data_iterator.restart_dataset(sess, 'train')
+        feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, 'train')}
         model.train()
-        for batch_i in range(10000000):
+        for batch_i in range(train_config.train_batches):
             try:
-                if batch_i >= train_config.train_batches:
-                    break
                 batch = sess.run(data_batch, feed_dict=feed_dict)
                 sample_verbose = verbose and (step + 1) % verbose_config.steps_sample == 0
                 batch_size = batch['target_text_ids'].shape[0]
-                res = run_model(model, batch, target_vocab,
+                res = run_model(model, batch, target_vocab, teach_rate=teach_rate,
                                 device=device, verbose=sample_verbose)
                 if train_config.enable_cross_entropy:
                     cel = res['ce']['loss']
@@ -271,26 +280,27 @@ if __name__ == '__main__':
                 if step % verbose_config.steps_eval == 0:
                     _eval_on_dev_set()
 
+                if train_config.enable_bleu and step % train_config.teach_rate_anneal_steps == 0:
+                    teach_rate *= train_config.teach_rate_anneal
+                    logging.info("teach rate: {}".format(teach_rate))
+
             except tf.errors.OutOfRangeError:
                 break
 
     def _test_decode(sess, model, mode, out_path, losses, device, verbose=False):
-        if mode == 'test':
-            data_iterator.switch_to_test_data(sess)
-        else:
-            data_iterator.switch_to_val_data(sess)
-        feed_dict = {tx.global_mode(): tf.estimator.ModeKeys.PREDICT}
-        bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, train_config.maxdecodelength, train_config.eval_batches, verbose_config.eval_print_samples)
+        data_iterator.restart_dataset(sess, mode)
+        feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, mode)}
+        bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, verbose_config.eval_max_decode_length, verbose_config.eval_batches, verbose_config.eval_print_samples)
         logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
         losses.append((bleu,))
 
-    def _eval_on_dev_set():
-        logging.info('evaluating on dev test...')
+    def _eval_on_dev_set(mode='val'):
+        logging.info('evaluating on {} dataset...'.format(mode))
         _test_decode(
             sess,
             model,
-            'dev',
-            os.path.join(logdir, 'dev.epoch{}'.format(epoch)),
+            mode,
+            os.path.join(logdir, '{}.epoch{}'.format(mode, epoch)),
             eval_losses,
             device)
 
@@ -319,6 +329,12 @@ if __name__ == '__main__':
             _load_model(epoch)
 
         if args.running_mode == 'train':
+            if train_config.enable_bleu:
+                teach_rate = train_config.initial_teach_rate
+                logging.info("teach rate: {}".format(teach_rate))
+            else:
+                teach_rate = None
+
             optimizer = optim.Adam(model.parameters(), lr=train_config.lr)
 
             train_losses = LossLogger(("loss", "cel", "mbl"), os.path.join(logdir, "train_loss"))

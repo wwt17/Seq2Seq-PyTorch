@@ -1,5 +1,5 @@
 training_data_hparams = {
-    'shuffle': False,
+    'shuffle': True,
     'num_epochs': 1,
     'batch_size': 80,
     'allow_smaller_final_batch': False,

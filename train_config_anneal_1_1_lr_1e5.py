@@ -12,7 +12,7 @@ softlengthmask = False
 max_decode_length = None
 
 optimizer = "adam"
-lr = 1e-4
+lr = 1e-5
 
 pretrain = 0
 

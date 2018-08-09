@@ -1,6 +1,7 @@
 initial_teach_rate = 1.0
-teach_rate_anneal = 1.0
+teach_rate_anneal = 0.95
 teach_rate_anneal_steps = 100
+teach_X = False
 mode = 'soft'
 bleuw = 1.
 enable_cross_entropy = True
@@ -12,7 +13,7 @@ softlengthmask = False
 max_decode_length = None
 
 optimizer = "adam"
-lr = 1e-4
+lr = 1e-5
 
 pretrain = 0
 

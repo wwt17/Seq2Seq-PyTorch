@@ -1,4 +1,4 @@
-initial_teach_rate = 1.0
+initial_teach_rate = None
 teach_rate_anneal = 1.0
 teach_rate_anneal_steps = 100
 mode = 'soft'
@@ -12,7 +12,7 @@ softlengthmask = False
 max_decode_length = None
 
 optimizer = "adam"
-lr = 1e-4
+lr = 1e-5
 
 pretrain = 0
 
@@ -20,7 +20,7 @@ seed = 0
 
 load_dir = None
 
-start_epoch = 22
+start_epoch = None
 max_epochs = 1000
 train_batches = 10000000
 

@@ -3,6 +3,7 @@ probs_verbose = True
 steps_loss = 10
 steps_sample = 100
 steps_eval = 100
+steps_ckpt = 100
 eval_batches = 10000000
 eval_max_decode_length = 50
 eval_print_samples = 5

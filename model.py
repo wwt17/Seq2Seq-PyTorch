@@ -380,7 +380,6 @@ class LSTMAttentionDot(nn.Module):
             max_decode_steps = input.size(0)
         def hidden_to_out(hidden):
             return out_layer(hidden[0] if isinstance(hidden, tuple) else hidden)
-        out = hidden_to_out(hidden)
         for step in range(max_decode_steps):
             hidden = recurrence(get_next(out, input, step) if step > 0 else input[step], hidden)
             out = hidden_to_out(hidden)
@@ -837,12 +836,15 @@ class Seq2SeqAttention(nn.Module):
 
         ctx = src_h.transpose(0, 1)
 
+        if max_decode_length is None:
+            max_decode_length = input_trg.shape[1]
+        teach_flags = [True] + [random.random() < teach_rate for step in range(max_decode_length)]
         if beam is None:
             get_next = lambda logit, tgt, step: tgt[step]
         elif beam == 0:
-            get_next = lambda logit, tgt, step: (tgt[step] if random.random() < teach_rate else torch.mm(F.softmax(logit, -1), self.trg_embedding.weight))
+            get_next = lambda logit, tgt, step: (tgt[step] if teach_flags[step] else torch.mm(F.softmax(logit, -1), self.trg_embedding.weight))
         elif beam > 0:
-            get_next = lambda logit, tgt, step: (tgt[step] if random.random() < teach_rate else self.trg_embedding(logit.max(-1)[1]))
+            get_next = lambda logit, tgt, step: (tgt[step] if teach_flags[step] else self.trg_embedding(logit.max(-1)[1]))
         logits, (_, _) = self.decoder(
             trg_emb,
             (decoder_init_state, c_t),
@@ -854,7 +856,7 @@ class Seq2SeqAttention(nn.Module):
             get_next,
         )
 
-        return logits
+        return logits, teach_flags
 
     def decode(self, logits):
         """Return probability distribution over words."""

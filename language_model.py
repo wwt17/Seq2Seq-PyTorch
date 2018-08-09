@@ -12,9 +12,12 @@ import texar as tx
 
 from options import *
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
-from criterions.matrixBLEU import mBLEU
+from criterions.matrixBLEUave import mBLEU
 from utils import strip_eos, onehot_initialization, find_valid_length
 from evaluate import evaluate_model_
+
+from matplotlib import pyplot as plt
+plt.switch_backend('agg')
 
 if False:
     seed = train_config.seed
@@ -45,6 +48,17 @@ class LossLogger(object):
     def recent_repr(self, k):
         v = self.recent(k)
         return "\t".join("{}: {:.3f}".format(name, val) for name, val in zip(self.names, v))
+    def plot(self, figure_name):
+        plt.figure(figsize=(14, 10))
+        shapes = ['x', '^', 'v', '--']
+        sizes = [6, 2, 2, 2]
+        for name, a, shape, size in zip(self.names, zip(*self.a), shapes, sizes):
+            plt.plot(a, shape, linewidth=size, label=name)
+        plt.ylabel('loss')
+        plt.xlabel('training steps')
+        plt.legend(loc=2., borderaxespad=0.)
+        plt.savefig('{}.png'.format(figure_name))
+        plt.close()
 
 def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     src_sents, tgt_sents = batch['source_text_ids'], batch['target_text_ids']
@@ -63,7 +77,7 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     }
 
     if train_config.enable_cross_entropy:
-        logits_ce = model(src_sents, tgt_sents[:, :-1])
+        logits_ce, teach_flags = model(src_sents, tgt_sents[:, :-1])
 
         tgt_sents_ = tgt_sents[:, 1:]
         flatten_logits_ce = logits_ce.contiguous().view(-1, logits_ce.shape[-1])
@@ -82,7 +96,7 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
             beam = 0
         else:
             raise NotImplementedError("train_config.mode {} is not implemented".format(train_config.mode))
-        logits_mb = model(
+        logits_mb, teach_flags = model(
             src_sents,
             tgt_sents[:, :-1],
             max_decode_length=train_config.max_decode_length,
@@ -93,7 +107,14 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
         probs = torch.cat([tgt_sents_onehot[:, :1], probs], dim=1)
         gen_probs, gen_ids = probs.max(-1)
 
-        X = probs
+        if hasattr(train_config, "teach_X") and not train_config.teach_X:
+            X = probs
+        else:
+            X = []
+            for t in range(probs.shape[1]):
+                X.append((tgt_sents_onehot if teach_flags[t] else probs)[:, t])
+            X[0] = torch.tensor(X[0], requires_grad=True)
+            X = torch.stack(X, dim=1)
         Y = tgt_sents_onehot
 
         eos_id = target_vocab.eos_token_id
@@ -192,6 +213,14 @@ if __name__ == '__main__':
 
     step = 0
 
+    def _save_model(epoch, step=0):
+        name = 'model.epoch{}'.format(epoch)
+        if step != 0:
+            name += '.{}'.format(step)
+        ckpt = os.path.join(logdir, name)
+        logging.info('saving model into {} ...'.format(ckpt))
+        torch.save(model.state_dict(), ckpt)
+
     def _train_epoch(sess, model, optimizer, pretrain, losses, verbose=verbose_config.verbose):
         global teach_rate
         def ids_to_words(ids):
@@ -213,7 +242,7 @@ if __name__ == '__main__':
                 else:
                     cel_ = -1.
                 if train_config.enable_bleu:
-                    probs = res['mb']['probs']
+                    probs = res['mb']['X']
                     if sample_verbose and verbose_config.probs_verbose:
                         probs.retain_grad()
                     gen_ids = res['mb']['gen_ids']
@@ -279,6 +308,10 @@ if __name__ == '__main__':
 
                 if step % verbose_config.steps_eval == 0:
                     _eval_on_dev_set()
+                    losses.plot(os.path.join(logdir, 'train_losses'))
+
+                if train_config.checkpoints and step % verbose_config.steps_ckpt == 0:
+                    _save_model(epoch, step)
 
                 if train_config.enable_bleu and step % train_config.teach_rate_anneal_steps == 0:
                     teach_rate *= train_config.teach_rate_anneal
@@ -313,8 +346,11 @@ if __name__ == '__main__':
         sess.run(tf.local_variables_initializer())
         sess.run(tf.tables_initializer())
 
-        def _load_model(epoch):
-            ckpt = os.path.join(logdir, "model.epoch{}".format(epoch))
+        def _load_model(epoch, step=0):
+            name = "model.epoch{}".format(epoch)
+            if step != 0:
+                name += ".{}".format(step)
+            ckpt = os.path.join(logdir, name)
             logging.info('loading model from {} ...'.format(ckpt))
             model.load_state_dict(torch.load(ckpt))
         if train_config.start_epoch is None:
@@ -322,8 +358,12 @@ if __name__ == '__main__':
             if len(ckpts) == 0:
                 epoch = 0
             else:
-                epoch = max(map(lambda s: int(s[len('model.epoch'):]), ckpts))
-                _load_model(epoch)
+                def get_epoch_and_step(s):
+                    s = s[len('model.epoch'):]
+                    s = s.split('.')
+                    return (int(s[0]), int(s[1]) if len(s) >= 2 else 0)
+                epoch, step = max(map(get_epoch_and_step, ckpts))
+                _load_model(epoch, step)
         else:
             epoch = train_config.start_epoch
             _load_model(epoch)
@@ -331,6 +371,8 @@ if __name__ == '__main__':
         if args.running_mode == 'train':
             if train_config.enable_bleu:
                 teach_rate = train_config.initial_teach_rate
+                if teach_rate is None:
+                    teach_rate = float(input('initial_teach_rate = '))
                 logging.info("teach rate: {}".format(teach_rate))
             else:
                 teach_rate = None
@@ -349,9 +391,7 @@ if __name__ == '__main__':
                 epoch += 1
                 _eval_on_dev_set()
                 if train_config.checkpoints:
-                    ckpt = os.path.join(logdir, 'model.epoch{}'.format(epoch))
-                    logging.info('saving model into {} ...'.format(ckpt))
-                    torch.save(model.state_dict(), ckpt)
+                    _save_model(epoch)
 
             logging.info('all training epochs finished.')
 

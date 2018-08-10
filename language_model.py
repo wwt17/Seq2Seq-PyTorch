@@ -13,7 +13,7 @@ import texar as tx
 from options import *
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
 from criterions.matrixBLEUave import mBLEU
-from utils import strip_eos, onehot_initialization, find_valid_length
+from utils import strip_eos, onehot_initialization, find_valid_length, get_grad_norm
 from evaluate import evaluate_model_
 from logger import LossLogger
 
@@ -236,6 +236,7 @@ if __name__ == '__main__':
 
                 optimizer.zero_grad()
                 loss.backward()
+                grad_norm = get_grad_norm(model.parameters())
 
                 if train_config.enable_bleu and sample_verbose:
                     def onehot(x):
@@ -265,11 +266,11 @@ if __name__ == '__main__':
                             for order in range(1, criterion_bleu.max_order + 1):
                                 logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode()))
                                 logging.info('{}-gram max grads:\n{}'.format(order, max_grad_[sample_i][order-1][:l]))
-                losses.append([loss_, cel_, mbl_])
+                losses.append([loss_, cel_, mbl_, grad_norm])
                 step += 1
                 if step % verbose_config.steps_loss == 0:
-                    logging.info('step: {}\tloss: {:.3f}\tcel: {:.3f}\tmbl: {:.3f}'.format(
-                        step, loss_, cel_, mbl_))
+                    logging.info('step: {}\tloss: {:.3f}\tcel: {:.3f}\tmbl: {:.3f}\tgrad_norm: {:.3f}'.format(
+                        step, loss_, cel_, mbl_, grad_norm))
 
                 optimizer.step()
 
@@ -346,7 +347,7 @@ if __name__ == '__main__':
 
             optimizer = optim.Adam(model.parameters(), lr=train_config.lr)
 
-            train_losses = LossLogger(("loss", "cel", "mbl"), os.path.join(logdir, "train_loss"))
+            train_losses = LossLogger(("loss", "cel", "mbl", "grad_norm"), os.path.join(logdir, "train_loss"))
             eval_losses = LossLogger(("bleu",), os.path.join(logdir, "eval_loss"))
 
             _eval_on_dev_set()

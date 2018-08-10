@@ -38,6 +38,18 @@ def find_valid_length(inputs, symbol='eos'):
     seq_len = torch.clamp(seq_len, 0, inputs.shape[1])
     return seq_len
 
+def get_grad_norm(parameters, norm_type=2):
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    norm_type = float(norm_type)
+    total_norm = 0
+    for p in parameters:
+        param_norm = p.grad.data.norm(norm_type)
+        total_norm += param_norm.item() ** norm_type
+    total_norm = total_norm ** (1. / norm_type)
+    return total_norm
+
 if __name__ == '__main__':
     a= Variable(torch.cuda.LongTensor([[1,2,3,4,5,6], [0,4,5,6,6,7]]))
     seq_len = find_valid_lenth(a, symbol='eos')

@@ -54,12 +54,11 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
         }
 
     if train_config.enable_bleu:
-        if train_config.mode == "greedy":
+        gamma = train_config.gamma
+        if gamma == 0:
             beam = 1
-        elif train_config.mode == "soft":
-            beam = 0
         else:
-            raise NotImplementedError("train_config.mode {} is not implemented".format(train_config.mode))
+            beam = 0
         logits_mb, teach_flags = model(
             src_sents,
             tgt_sents[:, :-1],
@@ -91,14 +90,18 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
             lenX = torch.sum(mask, dim=1) - 1
             return mask, lenX
         maskY, lenY = length_mask(Y)
-        if train_config.softlengthmask:
+        if train_config.soft_length_mask:
             maskX, lenX = length_mask(X)
         else:
             assert X.shape == Y.shape, "X.shape={}, Y.shape={}".format(X.shape, Y.shape)
             maskX, lenX = maskY, lenY
 
-        mbl, mbls_ = criterion_bleu(Y, X, lenY, lenX, maskY, maskX,
-            recall_w=train_config.recall_w, device=device, verbose=verbose)
+        mbl, mbls_ = criterion_bleu(
+            Y, X, lenY, lenX, maskY, maskX,
+            enable_prec=train_config.enable_prec,
+            enable_recall=train_config.enable_recall,
+            recall_w=train_config.recall_w,
+            device=device, verbose=verbose)
 
         ret['mb'] = {
             'logits': logits_mb,
@@ -111,13 +114,13 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
             'Y': Y,
         }
 
-    bleuw = train_config.bleuw
-    if bleuw == 0.:
+    bleu_w = train_config.bleu_w
+    if bleu_w == 0.:
         loss = cel
-    elif bleuw == 1.:
+    elif bleu_w == 1.:
         loss = mbl
     else:
-        loss = (1. - bleuw) * cel + bleuw * mbl
+        loss = (1. - bleu_w) * cel + bleu_w * mbl
 
     ret['loss'] = loss
 
@@ -172,7 +175,7 @@ if __name__ == '__main__':
         dropout=train_config.dropout
     ).to(device)
 
-    criterion_bleu = mBLEU(train_config.maxorder)
+    criterion_bleu = mBLEU(train_config.max_order)
     criterion_cross_entropy = nn.CrossEntropyLoss(ignore_index=int(target_vocab.pad_token_id))
 
     step = 0

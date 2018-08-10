@@ -83,7 +83,7 @@ def decode_minibatch_(
     tgt,
 ):
     """Decode a minibatch."""
-    return model(src, tgt, max_decode_length=max_decode_length, beam=1)[0].max(-1)[1]
+    return model(src, tgt, max_decode_length=max_decode_length, beam=1).max(-1)[1]
 
 def decode_minibatch(
     config,

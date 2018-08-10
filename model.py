@@ -5,7 +5,6 @@ from torch.autograd import Variable
 import math
 import torch.nn.functional as F
 import numpy as np
-import random
 
 class StackedAttentionLSTM(nn.Module):
     """Deep Attention LSTM."""
@@ -815,7 +814,7 @@ class Seq2SeqAttention(nn.Module):
 
         return h0_encoder, c0_encoder
 
-    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None, max_decode_length=None, beam=None, teach_rate=0.):
+    def forward(self, input_src, input_trg, trg_mask=None, ctx_mask=None, max_decode_length=None, beam=None, teach_flags=None):
         """Propogate input through the network."""
         src_emb = self.src_embedding(input_src)
         trg_emb = self.trg_embedding(input_trg)
@@ -838,7 +837,8 @@ class Seq2SeqAttention(nn.Module):
 
         if max_decode_length is None:
             max_decode_length = input_trg.shape[1]
-        teach_flags = [True] + [random.random() < teach_rate for step in range(max_decode_length)]
+        if teach_flags is None:
+            teach_flags = [True] + [False] * max_decode_length
         if beam is None:
             get_next = lambda logit, tgt, step: tgt[step]
         elif beam == 0:
@@ -856,7 +856,7 @@ class Seq2SeqAttention(nn.Module):
             get_next,
         )
 
-        return logits, teach_flags
+        return logits
 
     def decode(self, logits):
         """Return probability distribution over words."""

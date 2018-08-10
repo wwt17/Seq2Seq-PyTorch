@@ -1,4 +1,7 @@
-initial_teach_rate = 0.9
+fix_teach_gap = 1.0
+teach_gap = 1
+teach_cont = 9
+initial_teach_rate = 1.0
 teach_rate_anneal = 1.0
 teach_rate_anneal_steps = 100
 gamma = 1.0
@@ -9,6 +12,8 @@ enable_prec = True
 enable_recall = False
 recall_w = 0.0
 max_order = 4
+min_fn = 'min'
+min_c = 1.
 dropout = 0.
 soft_length_mask = False
 max_decode_length = None
@@ -35,3 +40,5 @@ if recall_w != 0:
     assert enable_recall
 
 checkpoints = False
+
+exp_name = "fix_1_9"

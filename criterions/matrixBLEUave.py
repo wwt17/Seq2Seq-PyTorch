@@ -7,13 +7,19 @@ class mBLEU(nn.Module):
         super(mBLEU, self).__init__()
         self.max_order = max_order
 
-    def forward(self, Y, X, lenY, lenX, maskY, maskX, enable_prec=True, enable_recall=False, recall_w=0., device='cuda', verbose=False):
+    def forward(self, Y, X, lenY, lenX, maskY, maskX, enable_prec=True, enable_recall=False, recall_w=0., min_fn='min', min_c=1., device='cuda', verbose=False):
         batch_size = X.shape[0]
         sizeX = X.shape[1]
         sizeY = Y.shape[1]
 
         zero = torch.tensor(0., device=device)
         one = torch.tensor(1., device=device)
+        if min_fn == 'min':
+            min_f = lambda x: torch.min(torch.tensor(min_c, device=device), x)
+        elif min_fn == 'tanh':
+            min_f = lambda x: torch.tanh(x / min_c)
+        else:
+            raise NotImplementedError("min_fn = {}".format(min_fn))
 
         XY = X.bmm(Y.transpose(1, 2))
         if enable_prec:
@@ -55,12 +61,12 @@ class mBLEU(nn.Module):
             if enable_prec:
                 cntXY = matchXY.sum(2)
                 cntXX = matchXX.sum(2)
-                o_order_X = torch.tanh(cntXY / torch.max(one, cntXX))
-                #o_order_X = torch.min(one - 0.00, torch.min(cntXX, cntXY) / torch.max(one, torch.max(cntXX, cntXY)))
+                o_order_X = min_f(cntXY / torch.max(one, cntXX))
+                #o_order_X = min_f(torch.min(cntXX, cntXY) / torch.max(one, torch.max(cntXX, cntXY)))
             if enable_recall:
                 cntYX = matchXY.sum(1)
                 cntYY = matchYY.sum(2)
-                o_order_Y = torch.tanh(cntYX / torch.max(one, cntYY))
+                o_order_Y = min_f(cntYX / torch.max(one, cntYY))
             if verbose:
                 if enable_prec:
                     cntXY_.append(cntXY)

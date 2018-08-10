@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import logging
+import random
 import numpy as np
 import tensorflow as tf
 import torch
@@ -19,6 +20,7 @@ from logger import LossLogger
 
 if hasattr(train_config, 'seed') and train_config.seed is not None:
     seed = train_config.seed
+    random.seed(seed)
     tf.set_random_seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -41,7 +43,7 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     }
 
     if train_config.enable_cross_entropy:
-        logits_ce, teach_flags = model(src_sents, tgt_sents[:, :-1])
+        logits_ce = model(src_sents, tgt_sents[:, :-1])
 
         tgt_sents_ = tgt_sents[:, 1:]
         flatten_logits_ce = logits_ce.contiguous().view(-1, logits_ce.shape[-1])
@@ -59,12 +61,25 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
             beam = 1
         else:
             beam = 0
-        logits_mb, teach_flags = model(
+        max_decode_length = train_config.max_decode_length
+        if max_decode_length is None:
+            max_decode_length = tgt_sents.shape[1] - 1
+        if random.random() < train_config.fix_teach_gap:
+            n = train_config.teach_gap + train_config.teach_cont
+            r = random.randrange(n)
+            teach_flags = [not (i % n < train_config.teach_gap)
+                           for i in range(r, r + max_decode_length)]
+            #logging.info("teach flags: {}".format("".join(str(int(flag)) for flag in teach_flags)))
+        else:
+            teach_flags = [random.random() < teach_rate
+                           for i in range(max_decode_length)]
+        teach_flags = [True] + teach_flags
+        logits_mb = model(
             src_sents,
             tgt_sents[:, :-1],
             max_decode_length=train_config.max_decode_length,
             beam=beam,
-            teach_rate=teach_rate)
+            teach_flags=teach_flags)
 
         probs = F.softmax(logits_mb, dim=-1)
         probs = torch.cat([tgt_sents_onehot[:, :1], probs], dim=1)
@@ -98,6 +113,8 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
 
         mbl, mbls_ = criterion_bleu(
             Y, X, lenY, lenX, maskY, maskX,
+            min_fn=train_config.min_fn,
+            min_c=train_config.min_c,
             enable_prec=train_config.enable_prec,
             enable_recall=train_config.enable_recall,
             recall_w=train_config.recall_w,

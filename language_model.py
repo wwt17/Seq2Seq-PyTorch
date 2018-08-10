@@ -16,6 +16,7 @@ from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
 from criterions.matrixBLEUave import mBLEU
 from utils import strip_eos, onehot_initialization, find_valid_length, get_grad_norm
 from evaluate import evaluate_model_
+from tensorboardX import SummaryWriter
 from logger import LossLogger
 
 if hasattr(train_config, 'seed') and train_config.seed is not None:
@@ -158,6 +159,8 @@ if __name__ == '__main__':
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
 
+    writer = SummaryWriter(os.path.join(logdir, "log"))
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info('device: {}'.format(device))
 
@@ -284,6 +287,10 @@ if __name__ == '__main__':
                                 logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode()))
                                 logging.info('{}-gram max grads:\n{}'.format(order, max_grad_[sample_i][order-1][:l]))
                 losses.append([loss_, cel_, mbl_, grad_norm])
+                writer.add_scalar('train/loss', loss_, step)
+                writer.add_scalar('train/cel', cel_, step)
+                writer.add_scalar('train/mbl', mbl_, step)
+                writer.add_scalar('train/grad_norm', grad_norm, step)
                 step += 1
                 if step % verbose_config.steps_loss == 0:
                     logging.info('step: {}\tloss: {:.3f}\tcel: {:.3f}\tmbl: {:.3f}\tgrad_norm: {:.3f}'.format(
@@ -308,9 +315,10 @@ if __name__ == '__main__':
     def _test_decode(sess, model, mode, out_path, losses, device, verbose=False):
         data_iterator.restart_dataset(sess, mode)
         feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, mode)}
-        bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, verbose_config.eval_max_decode_length, verbose_config.eval_batches, verbose_config.eval_print_samples)
+        bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, verbose_config.eval_max_decode_length, verbose_config.eval_batches, writer, verbose_config.eval_print_samples)
         logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
         losses.append((bleu,))
+        writer.add_scalar('{}/BLEU'.format(mode), bleu, step)
 
     def _eval_on_dev_set(mode='val'):
         logging.info('evaluating on {} dataset...'.format(mode))

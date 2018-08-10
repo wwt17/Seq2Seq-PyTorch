@@ -150,8 +150,7 @@ def model_perplexity(
 
 def evaluate_model_(
     model, sess, feed_dict, data_batch, target_vocab, max_decode_length,
-    eval_batches,
-    print_samples=0
+    eval_batches, writer, print_samples=0
 ):
     """Evaluate model."""
     gens, tgts = [], []
@@ -188,8 +187,12 @@ def evaluate_model_(
         for sent_i, (gen, tgt) in enumerate(zip(gens, tgts)):
             if sent_i >= print_samples:
                 break
-            logging.info('tgt: {}'.format(b' '.join(tgt).decode()))
-            logging.info('gen: {}'.format(b' '.join(gen).decode()))
+            tgt_text = b' '.join(tgt).decode()
+            gen_text = b' '.join(gen).decode()
+            logging.info('tgt: {}'.format(tgt_text))
+            logging.info('gen: {}'.format(gen_text))
+            writer.add_text('val/tgt', tgt_text)
+            writer.add_text('val/gen', gen_text)
     return get_bleu(gens, tgts)
 
 def evaluate_model(

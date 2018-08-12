@@ -84,7 +84,6 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
 
         probs = F.softmax(logits_mb, dim=-1)
         probs = torch.cat([tgt_sents_onehot[:, :1], probs], dim=1)
-        gen_probs, gen_ids = probs.max(-1)
 
         if hasattr(train_config, "teach_X") and not train_config.teach_X:
             X = probs
@@ -94,6 +93,7 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
                 X.append((tgt_sents_onehot if teach_flags[t] else probs)[:, t])
             X[0] = torch.tensor(X[0], requires_grad=True)
             X = torch.stack(X, dim=1)
+        gen_probs, gen_ids = X.max(-1)
         Y = tgt_sents_onehot
 
         eos_id = target_vocab.eos_token_id
@@ -256,7 +256,11 @@ if __name__ == '__main__':
 
                 optimizer.zero_grad()
                 loss.backward()
-                grad_norm = get_grad_norm(model.parameters())
+                if train_config.clip_grad_norm is None:
+                    grad_norm = get_grad_norm(model.parameters())
+                else:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), train_config.clip_grad_norm)
 
                 if train_config.enable_bleu and sample_verbose:
                     def onehot(x):
@@ -300,7 +304,7 @@ if __name__ == '__main__':
 
                 if step % verbose_config.steps_eval == 0:
                     _eval_on_dev_set()
-                    losses.plot(os.path.join(logdir, 'train_losses'))
+                    #losses.plot(os.path.join(logdir, 'train_losses'))
 
                 if train_config.checkpoints and step % verbose_config.steps_ckpt == 0:
                     _save_model(epoch, step)

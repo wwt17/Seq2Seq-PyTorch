@@ -1,6 +1,6 @@
 import os
-from matplotlib import pyplot as plt
-plt.switch_backend('agg')
+#from matplotlib import pyplot as plt
+#plt.switch_backend('agg')
 
 class LossLogger(object):
     def __init__(self, names, path):

@@ -1,8 +1,4 @@
 """Evaluation utils."""
-import sys
-
-sys.path.append('/u/subramas/Research/nmt-pytorch')
-
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -12,12 +8,18 @@ import math
 import numpy as np
 import subprocess
 import sys
+import os
 
 import logging
 
 import tensorflow as tf
 from utils import strip_eos
 
+plot_flag = False
+
+if plot_flag:
+    import matplotlib.pyplot as plt
+    plt.switch_backend('agg')
 
 def bleu_stats(hypothesis, reference):
     """Compute statistics for BLEU."""
@@ -150,10 +152,10 @@ def model_perplexity(
 
 def evaluate_model_(
     model, sess, feed_dict, data_batch, target_vocab, max_decode_length,
-    eval_batches, writer, print_samples=0
+    eval_batches, writer, step, logdir, print_samples=0
 ):
     """Evaluate model."""
-    gens, tgts = [], []
+    sent_pairs = []
     strip_eos_fn = strip_eos(target_vocab.eos_token.encode())
     for batch_i in range(eval_batches):
         try:
@@ -177,22 +179,34 @@ def evaluate_model_(
             # Process outputs
             gen, tgt = map(lambda x: x.tolist(), (gen, tgt))
             gen, tgt = map(strip_eos_fn, (gen, tgt))
-            gens.extend(gen)
-            tgts.extend(tgt)
+            sent_pairs.extend(zip(tgt, gen))
         except tf.errors.OutOfRangeError:
             break
 
     if print_samples > 0:
         logging.info("eval samples:")
-        for sent_i, (gen, tgt) in enumerate(zip(gens, tgts)):
+        for sent_i, (tgt, gen) in enumerate(sent_pairs):
             if sent_i >= print_samples:
                 break
             tgt_text = b' '.join(tgt).decode()
             gen_text = b' '.join(gen).decode()
             logging.info('tgt: {}'.format(tgt_text))
             logging.info('gen: {}'.format(gen_text))
-            writer.add_text('val/tgt', tgt_text)
-            writer.add_text('val/gen', gen_text)
+            writer.add_text('val/tgt', tgt_text, step)
+            writer.add_text('val/gen', gen_text, step)
+
+    sent_pairs.sort(key=lambda sent_pair: (len(sent_pair[0]), sent_pair[0]))
+
+    if plot_flag:
+        sent_bleus = [get_bleu([gen], [tgt]) for tgt, gen in sent_pairs]
+        lens = [len(tgt) for tgt, gen in sent_pairs]
+        plt.figure(figsize=(14, 10))
+        plt.bar(np.arange(len(sent_pairs)), np.array(sent_bleus))
+        plt.bar(np.arange(len(sent_pairs)), -np.array(lens))
+        plt.savefig(os.path.join(logdir, "eval_bleus_step{}.png".format(step)))
+        plt.close()
+
+    tgts, gens = zip(*sent_pairs)
     return get_bleu(gens, tgts)
 
 def evaluate_model(

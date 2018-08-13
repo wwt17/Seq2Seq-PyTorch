@@ -315,7 +315,10 @@ if __name__ == '__main__':
     def _test_decode(sess, model, mode, out_path, losses, device, verbose=False):
         data_iterator.restart_dataset(sess, mode)
         feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, mode)}
-        bleu = evaluate_model_(model, sess, feed_dict, data_batch, target_vocab, verbose_config.eval_max_decode_length, verbose_config.eval_batches, writer, verbose_config.eval_print_samples)
+        bleu = evaluate_model_(
+            model, sess, feed_dict, data_batch, target_vocab,
+            verbose_config.eval_max_decode_length, verbose_config.eval_batches,
+            writer, step, logdir, verbose_config.eval_print_samples)
         logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
         losses.append((bleu,))
         writer.add_scalar('{}/BLEU'.format(mode), bleu, step)

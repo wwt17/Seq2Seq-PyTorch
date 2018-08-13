@@ -14,7 +14,7 @@ import texar as tx
 from options import *
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
 from criterions.matrixBLEUave import mBLEU
-from utils import strip_eos, onehot_initialization, find_valid_length, get_grad_norm
+from utils import strip_eos, to_onehot, find_valid_length, get_grad_norm
 from evaluate import evaluate_model_
 from tensorboardX import SummaryWriter
 from logger import LossLogger
@@ -29,10 +29,6 @@ if hasattr(train_config, 'seed') and train_config.seed is not None:
 
 def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     src_sents, tgt_sents = batch['source_text_ids'], batch['target_text_ids']
-    tgt_sents_onehot = torch.tensor(
-        onehot_initialization(tgt_sents, target_vocab.size),
-        dtype=torch.float,
-        device=device)
     src_sents = torch.tensor(src_sents, dtype=torch.long, device=device)
     tgt_sents = torch.tensor(tgt_sents, dtype=torch.long, device=device)
     batch_size = tgt_sents.shape[0]
@@ -40,7 +36,6 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
     ret = {
         'src_sents': src_sents,
         'tgt_sents': tgt_sents,
-        'tgt_sents_onehot': tgt_sents_onehot,
     }
 
     if train_config.enable_cross_entropy:
@@ -57,6 +52,9 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
         }
 
     if train_config.enable_bleu:
+        tgt_sents_onehot = to_onehot(tgt_sents, target_vocab.size, dtype=torch.float)
+        ret['tgt_sents_onehot'] = tgt_sents_onehot
+
         gamma = train_config.gamma
         if gamma == 0:
             beam = 1
@@ -113,7 +111,7 @@ def run_model(model, batch, target_vocab, teach_rate, device, verbose=False):
             maskX, lenX = maskY, lenY
 
         mbl, mbls_ = criterion_bleu(
-            Y, X, lenY, lenX, maskY, maskX,
+            tgt_sents, X, lenY, lenX, maskY, maskX,
             min_fn=train_config.min_fn,
             min_c=train_config.min_c,
             enable_prec=train_config.enable_prec,
@@ -263,15 +261,13 @@ if __name__ == '__main__':
                         model.parameters(), train_config.clip_grad_norm)
 
                 if train_config.enable_bleu and sample_verbose:
-                    def onehot(x):
-                        return torch.tensor(onehot_initialization(x, target_vocab.size), dtype=torch.float, device=device)
                     samples = min(verbose_config.samples, batch_size)
                     tgt_ids = batch['target_text_ids']
                     gen_words, tgt_words = map(ids_to_words, (gen_ids, tgt_ids))
                     if verbose_config.probs_verbose:
-                        gen_grads = (probs.grad * onehot(gen_ids)).sum(-1)
+                        gen_grads = torch.gather(probs.grad, -1, gen_ids.unsqueeze(-1)).squeeze(-1)
                         max_grads, max_ids = probs.grad.min(-1)
-                        max_probs = (probs * onehot(max_ids)).sum(-1)
+                        max_probs = torch.gather(probs, -1, max_ids.unsqueeze(-1)).squeeze(-1)
                         max_words = ids_to_words(max_ids)
                         max_grad_, max_id_ = grad_.min(-1)
                         max_word_ = ids_to_words(max_id_)

@@ -18,6 +18,14 @@ def onehot_initialization(a, vocab_size):
     out[_all_idx(a, axis=2)] = 1
     return out
 
+def to_onehot(a, n, dtype=torch.long, device=None):
+    if device is None:
+        device = a.device
+    ret = torch.zeros(a.shape + (n,), dtype=dtype, device=device)
+    a = a.unsqueeze(-1)
+    ret.scatter_(-1, a, torch.ones(a.shape, dtype=dtype, device=device))
+    return ret
+
 def find_valid_length(inputs, symbol='eos'):
     final_pad = Variable(torch.ones([inputs.shape[0], 1]).long(), requires_grad=False) * 2
     # 2: EOS

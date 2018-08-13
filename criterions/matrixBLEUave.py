@@ -21,7 +21,7 @@ class mBLEU(nn.Module):
         else:
             raise NotImplementedError("min_fn = {}".format(min_fn))
 
-        XY = X.bmm(Y.transpose(1, 2))
+        XY = torch.gather(X, 2, Y.unsqueeze(1).expand([-1, X.shape[1], -1]))
         if enable_prec:
             XX = torch.max(X.bmm(X.transpose(1, 2)), torch.eye(sizeX, device=device))
         if enable_recall:

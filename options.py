@@ -49,6 +49,7 @@ train_config = importlib.import_module(args.train)
 model_config = importlib.import_module(args.model)
 data_config = importlib.import_module(args.data)
 verbose_config = importlib.import_module(args.verbose)
+mBLEU = train_config.mBLEU
 
 if hasattr(train_config, "exp_name"):
     exp_name = train_config.exp_name

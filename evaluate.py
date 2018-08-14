@@ -9,13 +9,16 @@ import numpy as np
 import subprocess
 import sys
 import os
+from socket import gethostname
+
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 import logging
 
 import tensorflow as tf
 from utils import strip_eos
 
-plot_flag = False
+plot_flag = (gethostname() not in ['quad-p40-0-0', 'quad-p40-0-1'])
 
 if plot_flag:
     import matplotlib.pyplot as plt
@@ -197,12 +200,22 @@ def evaluate_model_(
 
     sent_pairs.sort(key=lambda sent_pair: (len(sent_pair[0]), sent_pair[0]))
 
+    nltk_bleu = (lambda tgt, gen: 100 * sentence_bleu(
+        [tgt], gen,
+        smoothing_function=SmoothingFunction().method7)\
+        if len(tgt) > 1 and len(gen) > 1 else 0.)
+    sent_bleus = [nltk_bleu(tgt, gen) for tgt, gen in sent_pairs]
+    lens = [len(tgt) for tgt, gen in sent_pairs]
+    with open(os.path.join(logdir, "eval_bleus_step{}".format(step)), "w") as f:
+        for x in sent_bleus:
+            print("{:.6f}".format(x), file=f)
+    with open(os.path.join(logdir, "eval_lens"), "w") as f:
+        for x in lens:
+            print("{:.6f}".format(x), file=f)
     if plot_flag:
-        sent_bleus = [get_bleu([gen], [tgt]) for tgt, gen in sent_pairs]
-        lens = [len(tgt) for tgt, gen in sent_pairs]
         plt.figure(figsize=(14, 10))
-        plt.bar(np.arange(len(sent_pairs)), np.array(sent_bleus))
-        plt.bar(np.arange(len(sent_pairs)), -np.array(lens))
+        plt.bar(np.arange(len(sent_pairs)), np.array(sent_bleus), width=1.0, facecolor='black', edgecolor='black')
+        plt.bar(np.arange(len(sent_pairs)), -np.array(lens), width=1.0)
         plt.savefig(os.path.join(logdir, "eval_bleus_step{}.png".format(step)))
         plt.close()
 

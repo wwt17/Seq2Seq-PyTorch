@@ -13,7 +13,6 @@ import texar as tx
 
 from options import *
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
-from criterions.matrixBLEUave import mBLEU
 from utils import strip_eos, to_onehot, find_valid_length, get_grad_norm
 from evaluate import evaluate_model_
 from tensorboardX import SummaryWriter
@@ -387,7 +386,7 @@ if __name__ == '__main__':
                 epoch += 1
                 _eval_on_dev_set()
                 if train_config.checkpoints:
-                    _save_model(epoch)
+                    _save_model(epoch, step)
 
             logging.info('all training epochs finished.')
 

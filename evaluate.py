@@ -9,9 +9,12 @@ import numpy as np
 import subprocess
 import sys
 import os
+import operator
 from socket import gethostname
 
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge import Rouge
+rouge = Rouge()
 
 import logging
 
@@ -23,6 +26,11 @@ plot_flag = (gethostname() not in ['quad-p40-0-0', 'quad-p40-0-1'])
 if plot_flag:
     import matplotlib.pyplot as plt
     plt.switch_backend('agg')
+
+def dict_to_sorted_list(d):
+    a = list(d.items())
+    a.sort(key=operator.itemgetter(0))
+    return a
 
 def bleu_stats(hypothesis, reference):
     """Compute statistics for BLEU."""
@@ -220,6 +228,21 @@ def evaluate_model_(
         plt.close()
 
     tgts, gens = zip(*sent_pairs)
+    sent_pairs_ = list(filter(operator.itemgetter(0), sent_pairs))
+    tgts_, gens_ = zip(*sent_pairs_)
+    tgts_, gens_ = map(lambda sents: list(map(lambda sent: b' '.join(sent).decode(),
+                                              sents)),
+                       (tgts_, gens_))
+    rouge_scores = rouge.get_scores(gens_, tgts_, avg=True)
+    rouge_scores = dict_to_sorted_list(rouge_scores)
+    rouge_scores = [(key, dict_to_sorted_list(value)) for key, value in rouge_scores]
+    s = 'ROUGE'
+    for name, scores in rouge_scores:
+        s += '\n{}:'.format(name)
+        for name2, score in scores:
+            writer.add_scalar('val/{}/{}'.format(name, name2), score, step)
+            s += ' {}: {:.3f}'.format(name2, score)
+    logging.info(s)
     return get_bleu(gens, tgts)
 
 def evaluate_model(

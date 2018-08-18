@@ -44,11 +44,17 @@ argparser.add_argument('--model', type=str, default='model_config')
 argparser.add_argument('--data', type=str, default='data_configs')
 argparser.add_argument('--verbose', type=str, default='verbose_config')
 argparser.add_argument('--running_mode', type=str, default='train')
+argparser.add_argument('--caption', type=str, default='')
 args = argparser.parse_args()
 train_config = importlib.import_module(args.train)
 model_config = importlib.import_module(args.model)
 data_config = importlib.import_module(args.data)
 verbose_config = importlib.import_module(args.verbose)
+if args.caption:
+    captioning = True
+    caption_config = importlib.import_module(args.caption)
+else:
+    captioning = False
 mBLEU = train_config.mBLEU
 
 if hasattr(train_config, "exp_name"):

@@ -1,3 +1,4 @@
+from criterions.expectedBLEUave import mBLEU
 fix_teach_gap = 1.0
 teach_gap = 1
 teach_cont = 4
@@ -5,7 +6,7 @@ initial_teach_rate = 1.0
 teach_rate_anneal = 1.0
 teach_rate_anneal_steps = 100
 gamma = 1.0
-bleu_w = 1.0
+bleu_w = 0.0
 enable_cross_entropy = True
 enable_bleu = True
 enable_prec = True
@@ -20,6 +21,7 @@ max_decode_length = None
 
 optimizer = "adam"
 lr = 1e-5
+clip_grad_norm = 5
 
 pretrain = 0
 
@@ -41,4 +43,4 @@ if recall_w != 0:
 
 checkpoints = True
 
-exp_name = "fix"
+exp_name = "caption_ce"

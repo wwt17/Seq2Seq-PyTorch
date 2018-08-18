@@ -88,13 +88,11 @@ def get_bleu_moses(hypotheses, reference):
     pipe.stdin.close()
     return pipe.stdout.read()
 
+def decode_caption_batch(max_decode_length, decoder, encoder, src, tgt):
+    features = encoder(src)
+    return decoder(features, tgt, max_decode_length=max_decode_length, beam=1).max(-1)[1]
 
-def decode_minibatch_(
-    max_decode_length,
-    model,
-    src,
-    tgt,
-):
+def decode_minibatch_(max_decode_length, model, src, tgt):
     """Decode a minibatch."""
     return model(src, tgt, max_decode_length=max_decode_length, beam=1).max(-1)[1]
 
@@ -162,37 +160,58 @@ def model_perplexity(
     return np.exp(np.mean(losses))
 
 def evaluate_model_(
-    model, sess, feed_dict, data_batch, target_vocab, max_decode_length,
-    eval_batches, writer, step, logdir, print_samples=0
+    model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
+    max_decode_length, eval_batches, writer, step, logdir, print_samples=0
 ):
-    """Evaluate model."""
+    captioning = (encoder is not None)
+
     sent_pairs = []
     strip_eos_fn = strip_eos(target_vocab.eos_token.encode())
-    for batch_i in range(eval_batches):
-        try:
-            batch = sess.run(data_batch, feed_dict=feed_dict)
-            batch_size = batch['target_text_ids'].shape[0]
 
-            print('eval batch #{}'.format(batch_i))
+    if not captioning:
+        data_batch = data_loader
+        def _get_data_loader():
+            while True:
+                try:
+                    yield sess.run(data_batch, feed_dict=feed_dict)
+                except tf.errors.OutOfRangeError:
+                    break
+        data_loader = _get_data_loader()
 
-            # Decode a minibatch greedily __TODO__ add beam search decoding
+    for batch_i, batch in enumerate(data_loader):
+        if batch_i >= eval_batches:
+            break
+
+        if captioning:
+            images, tgt_ids, lengths = batch
+        else:
+            tgt_ids = batch['target_text_ids']
+        batch_size = tgt_ids.shape[0]
+
+        print('eval batch #{}'.format(batch_i))
+
+        # Decode a minibatch greedily TODO add beam search decoding
+        if captioning:
+            gen = decode_caption_batch(
+                max_decode_length, model, encoder, images, tgt_ids[:, :1])
+        else:
             gen = decode_minibatch_(
                 max_decode_length, model,
                 torch.LongTensor(batch['source_text_ids']).cuda(),
                 torch.LongTensor(batch['target_text_ids'][:, :1]).cuda()
             )
 
-            gen = gen.data.cpu().numpy()
-            gen = sess.run(target_vocab.map_ids_to_tokens(gen), feed_dict=feed_dict)
+        gen = ids_to_words(gen.data.cpu().numpy())
 
+        if captioning:
+            tgt = ids_to_words(tgt_ids)[:, 1:]
+        else:
             tgt = batch['target_text'][:, 1:]
 
-            # Process outputs
-            gen, tgt = map(lambda x: x.tolist(), (gen, tgt))
-            gen, tgt = map(strip_eos_fn, (gen, tgt))
-            sent_pairs.extend(zip(tgt, gen))
-        except tf.errors.OutOfRangeError:
-            break
+        # Process outputs
+        gen, tgt = map(lambda x: x.tolist(), (gen, tgt))
+        gen, tgt = map(strip_eos_fn, (gen, tgt))
+        sent_pairs.extend(zip(tgt, gen))
 
     if print_samples > 0:
         logging.info("eval samples:")

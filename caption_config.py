@@ -1,0 +1,13 @@
+embed_size = 256
+hidden_size = 512
+num_layers = 1
+num_workers = 0
+batch_size = 128
+vocab_path = 'caption_data/vocab.pkl'
+encoder_model_path = 'encoder.pkl'
+train_image_dir = 'caption_data/resized2014'
+train_caption_path = 'caption_data/annotations/captions_train2014.json'
+train_batch_size = batch_size
+val_image_dir = 'caption_data/val2014'
+val_caption_path = 'caption_data/annotations/captions_val2014.json'
+val_batch_size = batch_size

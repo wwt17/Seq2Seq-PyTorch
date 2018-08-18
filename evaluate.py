@@ -261,6 +261,7 @@ def evaluate_model_(
 
     sent_pairs = list(map(apply_on_sent_pair(to_str), sent_pairs))
     tgts, gens = zip(*sent_pairs)
+    gens = tuple([gen if gen else ' ' for gen in gens])
 
     rouge_scores = rouge.get_scores(
         gens, tuple(map(operator.itemgetter(0), tgts)), avg=True)

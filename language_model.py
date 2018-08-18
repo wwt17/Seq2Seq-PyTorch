@@ -282,7 +282,7 @@ if __name__ == '__main__':
         torch.save(model.state_dict(), ckpt)
 
     ids_to_words = target_vocab.ids_to_words if captioning else \
-        (lambda ids: sess.run(target_vocab.map_ids_to_tokens(ids), feed_dict=feed_dict))
+        (lambda ids: sess.run(target_vocab.map_ids_to_tokens(ids)))
 
     def _train_epoch(sess, model, optimizer, pretrain, losses, verbose=verbose_config.verbose):
         global teach_rate

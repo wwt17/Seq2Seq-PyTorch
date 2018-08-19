@@ -17,16 +17,14 @@ from options import *
 if 'captioning' not in locals():
     captioning = False
 from model import Seq2Seq, Seq2SeqAttention, Seq2SeqFastAttention
-from utils import strip_eos, to_onehot, find_valid_length, get_grad_norm
+from utils import to_onehot, get_grad_norm
 from evaluate import evaluate_model_
 from tensorboardX import SummaryWriter
 from logger import LossLogger
 
-from data_loader import get_loader, train_transform, eval_transform
+from data_loader import get_ann_loader, get_img_loader
 from caption_vocab import Vocabulary
 from caption_model import EncoderCNN, DecoderRNN
-from torch.nn.utils.rnn import pack_padded_sequence
-from torchvision import transforms
 
 if hasattr(train_config, 'seed') and train_config.seed is not None:
     seed = train_config.seed
@@ -195,21 +193,19 @@ if __name__ == '__main__':
             vocab = pickle.load(f)
         
         # Build data loader
-        train_data_loader = get_loader(
+        train_data_loader = get_ann_loader(
             caption_config.train_image_dir,
             caption_config.train_caption_path,
             vocab,
             caption_config.train_batch_size,
-            transform=train_transform,
             shuffle=True,
             num_workers=caption_config.num_workers,
             device=device)
-        val_data_loader = get_loader(
+        val_data_loader = get_img_loader(
             caption_config.val_image_dir,
             caption_config.val_caption_path,
             vocab,
             caption_config.val_batch_size,
-            transform=eval_transform,
             shuffle=False,
             num_workers=caption_config.num_workers,
             device=device)
@@ -416,7 +412,7 @@ if __name__ == '__main__':
         model.eval()
         if captioning:
             encoder.eval()
-            data_loader = data_loaders['train']
+            data_loader = data_loaders[mode]
             bleu = evaluate_model_(
                 model, encoder, sess, None, data_loader, vocab, ids_to_words,
                 verbose_config.eval_max_decode_length, verbose_config.eval_batches,

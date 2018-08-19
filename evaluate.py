@@ -12,14 +12,13 @@ import os
 import operator
 from socket import gethostname
 
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from nltk.translate.bleu_score import sentence_bleu, corpus_bleu, SmoothingFunction
 from rouge import Rouge
 rouge = Rouge()
 
 import logging
 
 import tensorflow as tf
-from utils import strip_eos
 
 plot_flag = (gethostname() not in ['quad-p40-0-0', 'quad-p40-0-1'])
 
@@ -159,14 +158,28 @@ def model_perplexity(
 
     return np.exp(np.mean(losses))
 
+def to_str(sent):
+    return b' '.join(sent).decode()
+
 def evaluate_model_(
     model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
     max_decode_length, eval_batches, writer, step, logdir, print_samples=0
 ):
     captioning = (encoder is not None)
+    eos_token = target_vocab.eos_token.encode()
+    def strip_bos_and_eos(sent):
+        sent = sent[1:]
+        try:
+            return sent[:sent.index(eos_token)]
+        except ValueError:
+            return sent
+    def apply_on_sent_pair(fn):
+        def func(pair):
+            refs, hyp = pair
+            return ([fn(ref) for ref in refs], fn(hyp))
+        return func
 
     sent_pairs = []
-    strip_eos_fn = strip_eos(target_vocab.eos_token.encode())
 
     if not captioning:
         data_batch = data_loader
@@ -182,57 +195,53 @@ def evaluate_model_(
         if batch_i >= eval_batches:
             break
 
-        if captioning:
-            images, tgt_ids, lengths = batch
-        else:
-            tgt_ids = batch['target_text_ids']
-        batch_size = tgt_ids.shape[0]
-
         print('eval batch #{}'.format(batch_i))
 
         # Decode a minibatch greedily TODO add beam search decoding
         if captioning:
+            images, captions = batch
+            batch_size = len(captions)
             gen = decode_caption_batch(
-                max_decode_length, model, encoder, images, tgt_ids[:, :1])
+                max_decode_length, model, encoder, images,
+                torch.tensor([target_vocab.bos_token_id] * batch_size, device='cuda').unsqueeze(1))
+            tgt = ids_to_words(captions)
         else:
+            batch_size = batch['target_text_ids'].shape[0]
             gen = decode_minibatch_(
                 max_decode_length, model,
                 torch.LongTensor(batch['source_text_ids']).cuda(),
                 torch.LongTensor(batch['target_text_ids'][:, :1]).cuda()
             )
-
-        gen = ids_to_words(gen.data.cpu().numpy())
-
-        if captioning:
-            tgt = ids_to_words(tgt_ids)[:, 1:]
-        else:
-            tgt = batch['target_text'][:, 1:]
+            tgt = batch['target_text'].tolist()
+            tgt = [[x] for x in tgt]
+        gen = ids_to_words(gen.data.cpu().numpy()).tolist()
 
         # Process outputs
-        gen, tgt = map(lambda x: x.tolist(), (gen, tgt))
-        gen, tgt = map(strip_eos_fn, (gen, tgt))
-        sent_pairs.extend(zip(tgt, gen))
+        sent_pairs.extend(map(apply_on_sent_pair(strip_bos_and_eos), zip(tgt, gen)))
 
     if print_samples > 0:
         logging.info("eval samples:")
-        for sent_i, (tgt, gen) in enumerate(sent_pairs):
+        def log_sent(sent, name):
+            text = to_str(sent)
+            logging.info('{}: {}'.format(name, text))
+            writer.add_text('val/{}'.format(name), text, step)
+        for sent_i, (tgts, gen) in enumerate(sent_pairs):
             if sent_i >= print_samples:
                 break
-            tgt_text = b' '.join(tgt).decode()
-            gen_text = b' '.join(gen).decode()
-            logging.info('tgt: {}'.format(tgt_text))
-            logging.info('gen: {}'.format(gen_text))
-            writer.add_text('val/tgt', tgt_text, step)
-            writer.add_text('val/gen', gen_text, step)
+            for tgt in tgts:
+                log_sent(tgt, 'tgt')
+            log_sent(gen, 'gen')
 
-    sent_pairs.sort(key=lambda sent_pair: (len(sent_pair[0]), sent_pair[0]))
+    sent_pairs = list(filter(lambda pair: pair[0][0], sent_pairs))
+    sent_pairs.sort(key=lambda sent_pair: (len(sent_pair[0][0]), sent_pair[0]))
 
-    nltk_bleu = (lambda tgt, gen: 100 * sentence_bleu(
-        [tgt], gen,
-        smoothing_function=SmoothingFunction().method7)\
-        if len(tgt) > 1 and len(gen) > 1 else 0.)
-    sent_bleus = [nltk_bleu(tgt, gen) for tgt, gen in sent_pairs]
-    lens = [len(tgt) for tgt, gen in sent_pairs]
+    sent_bleu_fn = lambda tgt, gen: sentence_bleu(
+                       tgt, gen, smoothing_function=SmoothingFunction().method7)\
+                   if len(tgt) > 1 and len(gen) > 1 else 0.
+    sent_bleus = [sent_bleu_fn(tgt, gen) for tgt, gen in sent_pairs]
+    def average_len(tgt):
+        return sum(map(len, tgt)) / len(tgt)
+    lens = [average_len(tgt) for tgt, gen in sent_pairs]
     with open(os.path.join(logdir, "eval_bleus_step{}".format(step)), "w") as f:
         for x in sent_bleus:
             print("{:.6f}".format(x), file=f)
@@ -241,28 +250,31 @@ def evaluate_model_(
             print("{:.6f}".format(x), file=f)
     if plot_flag:
         plt.figure(figsize=(14, 10))
-        plt.bar(np.arange(len(sent_pairs)), np.array(sent_bleus), width=1.0, facecolor='black', edgecolor='black')
+        plt.bar(np.arange(len(sent_pairs)), np.array(sent_bleus) * 100,
+                width=1.0, facecolor='black', edgecolor='black')
         plt.bar(np.arange(len(sent_pairs)), -np.array(lens), width=1.0)
         plt.savefig(os.path.join(logdir, "eval_bleus_step{}.png".format(step)))
         plt.close()
 
     tgts, gens = zip(*sent_pairs)
-    sent_pairs_ = list(filter(operator.itemgetter(0), sent_pairs))
-    tgts_, gens_ = zip(*sent_pairs_)
-    tgts_, gens_ = map(lambda sents: list(map(lambda sent: b' '.join(sent).decode(),
-                                              sents)),
-                       (tgts_, gens_))
-    rouge_scores = rouge.get_scores(gens_, tgts_, avg=True)
+    corpus_bleu_score = corpus_bleu(tgts, gens)
+
+    sent_pairs = list(map(apply_on_sent_pair(to_str), sent_pairs))
+    tgts, gens = zip(*sent_pairs)
+
+    rouge_scores = rouge.get_scores(
+        gens, tuple(map(operator.itemgetter(0), tgts)), avg=True)
     rouge_scores = dict_to_sorted_list(rouge_scores)
     rouge_scores = [(key, dict_to_sorted_list(value)) for key, value in rouge_scores]
-    s = 'ROUGE'
+    s = 'ROUGE:'
     for name, scores in rouge_scores:
         s += '\n{}:'.format(name)
         for name2, score in scores:
             writer.add_scalar('val/{}/{}'.format(name, name2), score, step)
             s += ' {}: {:.3f}'.format(name2, score)
     logging.info(s)
-    return get_bleu(gens, tgts)
+
+    return corpus_bleu_score
 
 def evaluate_model(
     model, src, src_test, trg,

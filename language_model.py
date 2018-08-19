@@ -190,13 +190,13 @@ if __name__ == '__main__':
     if captioning:
         # Load vocabulary wrapper
         with open(caption_config.vocab_path, 'rb') as f:
-            vocab = pickle.load(f)
+            target_vocab = pickle.load(f)
         
         # Build data loader
         train_data_loader = get_ann_loader(
             caption_config.train_image_dir,
             caption_config.train_caption_path,
-            vocab,
+            target_vocab,
             caption_config.train_batch_size,
             shuffle=True,
             num_workers=caption_config.num_workers,
@@ -204,7 +204,7 @@ if __name__ == '__main__':
         val_data_loader = get_img_loader(
             caption_config.val_image_dir,
             caption_config.val_caption_path,
-            vocab,
+            target_vocab,
             caption_config.val_batch_size,
             shuffle=False,
             num_workers=caption_config.num_workers,
@@ -220,11 +220,9 @@ if __name__ == '__main__':
         encoder = EncoderCNN(caption_config.embed_size).to(device)
         decoder = DecoderRNN(caption_config.embed_size,
                              caption_config.hidden_size,
-                             len(vocab),
+                             len(target_vocab),
                              caption_config.num_layers).to(device)
         model = decoder
-
-        criterion_cross_entropy = nn.CrossEntropyLoss(ignore_index=vocab('<pad>'))
 
     else:
         training_data = tx.data.PairedTextData(hparams=data_config.training_data_hparams)
@@ -258,8 +256,7 @@ if __name__ == '__main__':
             dropout=train_config.dropout
         ).to(device)
 
-        criterion_cross_entropy = nn.CrossEntropyLoss(ignore_index=int(target_vocab.pad_token_id))
-
+    criterion_cross_entropy = nn.CrossEntropyLoss(ignore_index=int(target_vocab.pad_token_id))
     criterion_bleu = mBLEU(train_config.max_order)
 
     step = 0
@@ -284,7 +281,7 @@ if __name__ == '__main__':
         logging.info('saving model into {} ...'.format(ckpt))
         torch.save(model.state_dict(), ckpt)
 
-    ids_to_words = vocab.ids_to_words if captioning else \
+    ids_to_words = target_vocab.ids_to_words if captioning else \
         (lambda ids: sess.run(target_vocab.map_ids_to_tokens(ids), feed_dict=feed_dict))
 
     def _train_epoch(sess, model, optimizer, pretrain, losses, verbose=verbose_config.verbose):
@@ -292,7 +289,7 @@ if __name__ == '__main__':
         global step
         if captioning:
             data_loader = data_loaders['train']
-            encoder.eval()#train()
+            encoder.train()
         else:
             data_iterator.restart_dataset(sess, 'train')
             feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, 'train')}
@@ -314,7 +311,7 @@ if __name__ == '__main__':
             sample_verbose = verbose and (step + 1) % verbose_config.steps_sample == 0
             if captioning:
                 images, tgt_ids, lengths = batch
-                res = run_model(model, encoder, batch, vocab, teach_rate=teach_rate,
+                res = run_model(model, encoder, batch, target_vocab, teach_rate=teach_rate,
                                 device=device, verbose=sample_verbose)
             else:
                 tgt_ids = batch['target_text_ids']
@@ -399,6 +396,9 @@ if __name__ == '__main__':
 
             if step % verbose_config.steps_eval == 0:
                 _eval_on_dev_set()
+                if captioning:
+                    encoder.train()
+                model.train()
                 #losses.plot(os.path.join(logdir, 'train_losses'))
 
             if train_config.checkpoints and step % verbose_config.steps_ckpt == 0:
@@ -414,7 +414,7 @@ if __name__ == '__main__':
             encoder.eval()
             data_loader = data_loaders[mode]
             bleu = evaluate_model_(
-                model, encoder, sess, None, data_loader, vocab, ids_to_words,
+                model, encoder, sess, None, data_loader, target_vocab, ids_to_words,
                 verbose_config.eval_max_decode_length, verbose_config.eval_batches,
                 writer, step, logdir, verbose_config.eval_print_samples)
         else:
@@ -424,7 +424,8 @@ if __name__ == '__main__':
                 model, None, sess, feed_dict, data_batch, target_vocab, ids_to_words,
                 verbose_config.eval_max_decode_length, verbose_config.eval_batches,
                 writer, step, logdir, verbose_config.eval_print_samples)
-        logging.info("epoch #{} BLEU: {}".format(epoch, bleu))
+        bleu *= 100
+        logging.info("epoch #{} BLEU: {:.6f}".format(epoch, bleu))
         losses.append((bleu,))
         writer.add_scalar('{}/BLEU'.format(mode), bleu, step)
 

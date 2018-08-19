@@ -40,6 +40,12 @@ class Vocabulary(object):
         return np.vectorize(lambda idx: self.idx2word[idx].encode())(ids)
 
     @property
+    def pad_token(self):
+        return '<pad>'
+    @property
+    def pad_token_id(self):
+        return self.word2idx[self.pad_token]
+    @property
     def bos_token(self):
         return '<start>'
     @property
@@ -51,6 +57,12 @@ class Vocabulary(object):
     @property
     def eos_token_id(self):
         return self.word2idx[self.eos_token]
+    @property
+    def unk_token(self):
+        return '<unk>'
+    @property
+    def unk_token_id(self):
+        return self.word2idx[self.unk_token]
 
 def build_vocab(json, threshold):
     """Build a simple vocabulary wrapper."""

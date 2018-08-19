@@ -289,7 +289,7 @@ if __name__ == '__main__':
         global step
         if captioning:
             data_loader = data_loaders['train']
-            encoder.train()
+            encoder.eval()
         else:
             data_iterator.restart_dataset(sess, 'train')
             feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, 'train')}
@@ -397,7 +397,7 @@ if __name__ == '__main__':
             if step % verbose_config.steps_eval == 0:
                 _eval_on_dev_set()
                 if captioning:
-                    encoder.train()
+                    encoder.eval()
                 model.train()
                 #losses.plot(os.path.join(logdir, 'train_losses'))
 

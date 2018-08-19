@@ -20,7 +20,7 @@ import logging
 
 import tensorflow as tf
 
-plot_flag = (gethostname() not in ['quad-p40-0-0', 'quad-p40-0-1'])
+plot_flag = (gethostname() not in ['quad-p40-0-0', 'quad-p40-0-1', 'dual-k40-0-1'])
 
 if plot_flag:
     import matplotlib.pyplot as plt

@@ -22,9 +22,10 @@ from evaluate import evaluate_model_
 from tensorboardX import SummaryWriter
 from logger import LossLogger
 
-from data_loader import get_ann_loader, get_img_loader
-from caption_vocab import Vocabulary
-from caption_model import EncoderCNN, DecoderRNN
+if captioning:
+    from data_loader import get_ann_loader, get_img_loader
+    from caption_vocab import Vocabulary
+    from caption_model import EncoderCNN, DecoderRNN
 
 if hasattr(train_config, 'seed') and train_config.seed is not None:
     seed = train_config.seed

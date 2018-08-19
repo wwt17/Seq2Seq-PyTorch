@@ -43,4 +43,4 @@ if recall_w != 0:
 
 checkpoints = True
 
-exp_name = "caption_ce"
+exp_name = "ce"

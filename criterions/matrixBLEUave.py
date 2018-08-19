@@ -26,7 +26,7 @@ class mBLEU(nn.Module):
             XX = torch.max(X.bmm(X.transpose(1, 2)), torch.eye(sizeX, device=device))
         if enable_recall:
             Y_ = Y.unsqueeze(2).expand([-1, -1, Y.shape[1]])
-            YY = (Y_ == Y_.transpose(1, 2)).type(torch.FloatTensor)
+            YY = (Y_ == Y_.transpose(1, 2)).float()
 
         maskX = maskX.unsqueeze(2)
         maskY = maskY.unsqueeze(2)

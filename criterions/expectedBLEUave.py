@@ -25,7 +25,7 @@ class mBLEU(nn.Module):
 
         XY = torch.gather(X, 2, Y.unsqueeze(1).expand([-1, X.shape[1], -1]))
         Y_ = Y.unsqueeze(2).expand([-1, -1, Y.shape[1]])
-        YY = (Y_ == Y_.transpose(1, 2)).type(torch.cuda.FloatTensor)
+        YY = (Y_ == Y_.transpose(1, 2)).float()
 
         maskX = maskX.unsqueeze(2)
         maskY = maskY.unsqueeze(2)

@@ -166,9 +166,11 @@ def evaluate_model_(
     max_decode_length, eval_batches, writer, step, logdir, print_samples=0
 ):
     captioning = (encoder is not None)
+    bos_token = target_vocab.bos_token.encode()
     eos_token = target_vocab.eos_token.encode()
     def strip_bos_and_eos(sent):
-        sent = sent[1:]
+        if sent and sent[0] == bos_token:
+            sent = sent[1:]
         try:
             return sent[:sent.index(eos_token)]
         except ValueError:

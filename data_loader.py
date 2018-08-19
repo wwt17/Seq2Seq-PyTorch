@@ -81,6 +81,7 @@ class CocoImgDataset(CocoDataset):
     def __init__(self, root, json, vocab, transform=None):
         super(CocoImgDataset, self).__init__(root, json, vocab, transform)
         self.imgToAnns = list(self.coco.imgToAnns.items())
+        self.imgToAnns.sort()
 
     def __len__(self):
         return len(self.imgToAnns)

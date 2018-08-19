@@ -161,6 +161,15 @@ def model_perplexity(
 def to_str(sent):
     return b' '.join(sent).decode()
 
+def average_len(tgt):
+    return sum(map(len, tgt)) / len(tgt)
+
+def apply_on_sent_pair(fn):
+    def func(pair):
+        refs, hyp = pair
+        return ([fn(ref) for ref in refs], fn(hyp))
+    return func
+
 def evaluate_model_(
     model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
     max_decode_length, eval_batches, writer, step, logdir, print_samples=0
@@ -175,11 +184,6 @@ def evaluate_model_(
             return sent[:sent.index(eos_token)]
         except ValueError:
             return sent
-    def apply_on_sent_pair(fn):
-        def func(pair):
-            refs, hyp = pair
-            return ([fn(ref) for ref in refs], fn(hyp))
-        return func
 
     sent_pairs = []
 
@@ -235,14 +239,12 @@ def evaluate_model_(
             log_sent(gen, 'gen')
 
     sent_pairs = list(filter(lambda pair: pair[0][0], sent_pairs))
-    sent_pairs.sort(key=lambda sent_pair: (len(sent_pair[0][0]), sent_pair[0]))
+    sent_pairs.sort(key=lambda sent_pair: (average_len(sent_pair[0]), sent_pair[0]))
 
     sent_bleu_fn = lambda tgt, gen: sentence_bleu(
                        tgt, gen, smoothing_function=SmoothingFunction().method7)\
                    if len(tgt) > 1 and len(gen) > 1 else 0.
     sent_bleus = [sent_bleu_fn(tgt, gen) for tgt, gen in sent_pairs]
-    def average_len(tgt):
-        return sum(map(len, tgt)) / len(tgt)
     lens = [average_len(tgt) for tgt, gen in sent_pairs]
     with open(os.path.join(logdir, "eval_bleus_step{}".format(step)), "w") as f:
         for x in sent_bleus:

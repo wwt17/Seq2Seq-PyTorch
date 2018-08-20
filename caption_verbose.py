@@ -1,0 +1,10 @@
+verbose = True
+probs_verbose = True
+steps_loss = 10
+steps_sample = 500
+steps_eval = 500
+steps_ckpt = 500
+eval_batches = 50
+eval_max_decode_length = 20
+eval_print_samples = 5
+samples = 5

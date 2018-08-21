@@ -57,7 +57,7 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
     if train_config.enable_cross_entropy:
         if captioning:
             src = encoder(images)
-            src.detach_()
+            src = src.detach()
         else:
             src = src_sents
         logits_ce = model(src, tgt_sents[:, :-1])
@@ -97,7 +97,7 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
 
         if captioning:
             src = encoder(images)
-            src.detach_()
+            src = src.detach()
         else:
             src = src_sents
         logits_mb = model(
@@ -218,8 +218,9 @@ if __name__ == '__main__':
         }
 
         # Build the models
-        encoder = EncoderCNN(caption_config.embed_size).to(device)
-        decoder = DecoderRNN(caption_config.embed_size,
+        encoder = EncoderCNN().to(device)
+        decoder = DecoderRNN(encoder.outdim,
+                             caption_config.embed_size,
                              caption_config.hidden_size,
                              len(target_vocab),
                              caption_config.num_layers).to(device)
@@ -269,10 +270,10 @@ if __name__ == '__main__':
         ckpt = os.path.join(logdir, name)
         logging.info('loading model from {} ...'.format(ckpt))
         model.load_state_dict(torch.load(ckpt))
-        if captioning:
-            ckpt = caption_config.encoder_model_path
-            logging.info('loading encoder from {} ...'.format(ckpt))
-            encoder.load_state_dict(torch.load(ckpt))
+        #if captioning:
+        #    ckpt = caption_config.encoder_model_path
+        #    logging.info('loading encoder from {} ...'.format(ckpt))
+        #    encoder.load_state_dict(torch.load(ckpt))
 
     def _save_model(epoch, step=None):
         name = 'model.epoch{}'.format(epoch)

@@ -6,34 +6,37 @@ from torch.nn.utils.rnn import pack_padded_sequence
 
 
 class EncoderCNN(nn.Module):
-    def __init__(self, embed_size):
+    def __init__(self):
         """Load the pretrained ResNet-152 and replace top fc layer."""
         super(EncoderCNN, self).__init__()
         resnet = models.resnet152(pretrained=True)
         modules = list(resnet.children())[:-1]      # delete the last fc layer.
         self.resnet = nn.Sequential(*modules)
-        self.linear = nn.Linear(resnet.fc.in_features, embed_size)
-        self.bn = nn.BatchNorm1d(embed_size, momentum=0.01)
+        self.outdim = resnet.fc.in_features
         
     def forward(self, images):
         """Extract feature vectors from input images."""
         with torch.no_grad():
             features = self.resnet(images)
-        features = features.reshape(features.size(0), -1)
-        features = self.bn(self.linear(features))
+            features = features.reshape(features.size(0), -1)
         return features
 
 
 class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
+    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, num_layers):
         """Set the hyper-parameters and build the layers."""
         super(DecoderRNN, self).__init__()
+        
+        self.init_linear = nn.Linear(feature_size, embed_size)
+        self.init_bn = nn.BatchNorm1d(embed_size, momentum=0.01)
+
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.linear = nn.Linear(hidden_size, vocab_size)
         
     def forward(self, features, captions, states=None,
                 max_decode_length=None, beam=None, teach_flags=None):
+        features = self.init_bn(self.init_linear(features))
         tgt = self.embed(captions)
 
         if max_decode_length is None:

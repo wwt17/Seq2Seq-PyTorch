@@ -22,6 +22,8 @@ from evaluate import evaluate_model_
 from tensorboardX import SummaryWriter
 from logger import LossLogger
 
+from nltk.translate.bleu_score import sentence_bleu
+
 if captioning:
     from data_loader import get_ann_loader, get_img_loader
     from caption_vocab import Vocabulary
@@ -55,22 +57,73 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
     batch_size = tgt_sents.shape[0]
 
     if train_config.enable_cross_entropy:
+        ret['ce'] = {}
+
         if captioning:
             src = encoder(images)
             src = src.detach()
         else:
             src = src_sents
-        logits_ce = model(src, tgt_sents[:, :-1])
 
-        tgt_sents_ = tgt_sents[:, 1:]
-        flatten_logits_ce = logits_ce.contiguous().view(-1, logits_ce.shape[-1])
-        flatten_tgt_sents_ = tgt_sents_.contiguous().view(-1)
-        cel = criterion_cross_entropy(flatten_logits_ce, flatten_tgt_sents_)
+        if train_config.enable_xe:
+            logits_xe = model(src, tgt_sents[:, :-1])
+            tgt_sents_ = tgt_sents[:, 1:]
+            flatten_logits_xe = logits_xe.contiguous().view(-1, logits_xe.shape[-1])
+            flatten_tgt_sents_ = tgt_sents_.contiguous().view(-1)
+            xel = criterion_cross_entropy(flatten_logits_xe, flatten_tgt_sents_)
 
-        ret['ce'] = {
-            'logits': logits_ce,
+            ret['ce']['xe'] = {
+                'logits': logits_xe,
+                'loss': xel,
+            }
+
+        else:
+            xel = 0.
+
+        if train_config.enable_pg:
+            ret['ce']['pg'] = {}
+
+            ids_sample, logprobs_sample = model(
+                src,
+                tgt_sents[:, :-1],
+                max_decode_length=train_config.max_decode_length,
+                beam=-1)
+            logits_greedy = model(
+                src,
+                tgt_sents[:, :-1],
+                max_decode_length=train_config.max_decode_length,
+                beam=1)
+            logprobs_greedy, ids_greedy = logits_greedy.max(-1)
+
+            def seq_tolist(ids):
+                a = ids.tolist()
+                try:
+                    return a[:a.index(eos_id)]
+                except ValueError:
+                    return a
+            def tolist(ids):
+                return list(map(seq_tolist, ids.cpu().numpy()))
+
+            seq_sample = tolist(ids_sample)
+            seq_greedy = tolist(ids_greedy)
+            seq_target = tolist(tgt_sents[:, 1:])
+
+            pgl = []
+            for seq_s, seq_g, seq_t, logprob_sample \
+            in zip(seq_sample, seq_greedy, seq_target, logprobs_sample):
+                reward = ( sentence_bleu([seq_t], seq_s)
+                          -sentence_bleu([seq_t], seq_g))
+                pgl.append(reward * -logprob_sample[:len(seq_sample)].sum())
+            pgl = torch.stack(pgl).mean()
+
+        else:
+            pgl = 0.
+
+        cel = train_config.xe_w * xel + train_config.pg_w * pgl
+
+        ret['ce'].update({
             'loss': cel,
-        }
+        })
 
     if train_config.enable_bleu:
         tgt_sents_onehot = to_onehot(tgt_sents, target_vocab_size, dtype=torch.float)

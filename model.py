@@ -839,12 +839,30 @@ class Seq2SeqAttention(nn.Module):
             max_decode_length = input_trg.shape[1]
         if teach_flags is None:
             teach_flags = [True] + [False] * max_decode_length
+        sampling = False
         if beam is None:
             get_next = lambda logit, tgt, step: tgt[step]
         elif beam == 0:
             get_next = lambda logit, tgt, step: (tgt[step] if teach_flags[step] else torch.mm(F.softmax(logit, -1), self.trg_embedding.weight))
         elif beam > 0:
             get_next = lambda logit, tgt, step: (tgt[step] if teach_flags[step] else self.trg_embedding(logit.max(-1)[1]))
+        else:
+            sampling = True
+            sample_ids = []
+            sample_logprobs = []
+            def get_next(logit, tgt, step):
+                if teach_flags[step]: # Should not get into this branch as this time
+                    sample_ids.append(None) # Meaningless
+                    sample_logprobs.append(None) # Meaningless
+                    return tgt[step]
+                probs = F.softmax(logit, -1)
+                sample_id = probs.multinomial(1)
+                sample_logprob = logit.gather(-1, sample_id).squeeze(-1)
+                sample_id = sample_id.squeeze(-1)
+                sample_ids.append(sample_id)
+                sample_logprobs.append(sample_logprob)
+                return self.trg_embedding(sample_id)
+
         logits, (_, _) = self.decoder(
             trg_emb,
             (decoder_init_state, c_t),
@@ -855,6 +873,11 @@ class Seq2SeqAttention(nn.Module):
             beam,
             get_next,
         )
+
+        if sampling:
+            sample_ids = torch.stack(sample_ids, 1)
+            sample_logprobs = torch.stack(sample_logprobs, 1)
+            return sample_ids, sample_logprobs
 
         return logits
 

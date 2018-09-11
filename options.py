@@ -29,6 +29,11 @@ def get_train_name(config):
     name += 'gamma_{}__'.format(config.gamma)
     name += 'lr_{}__'.format(config.lr)
     name += 'pretrain_{}__'.format(config.pretrain)
+    if config.enable_pg:
+        if config.enable_xe:
+            name += 'xe_w_{}__'.format(config.xe_w)
+        if config.enable_pg:
+            name += 'pg_w_{}__'.format(config.pg_w)
     if config.enable_bleu:
         name += 'fix_rate_{}_{}_{}__'.format(config.fix_teach_gap, config.teach_gap, config.teach_cont)
         name += 'teach_anneal_{}_{}_{}__'.format(config.initial_teach_rate, config.teach_rate_anneal, config.teach_rate_anneal_steps)

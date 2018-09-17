@@ -1,4 +1,5 @@
 """Evaluation utils."""
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -158,8 +159,8 @@ def model_perplexity(
 
     return np.exp(np.mean(losses))
 
-def to_str(sent):
-    return b' '.join(sent).decode()
+def to_str(sent, encoding):
+    return b' '.join(sent).decode(encoding)
 
 def average_len(tgt):
     return sum(map(len, tgt)) / len(tgt)
@@ -172,7 +173,8 @@ def apply_on_sent_pair(fn):
 
 def evaluate_model_(
     model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
-    max_decode_length, eval_batches, writer, step, logdir, print_samples=0
+    max_decode_length, eval_batches, writer, step, logdir, print_samples=0,
+    encoding='utf8',
 ):
     captioning = (encoder is not None)
     bos_token = target_vocab.bos_token.encode()
@@ -228,7 +230,7 @@ def evaluate_model_(
     if print_samples > 0:
         logging.info("eval samples:")
         def log_sent(sent, name):
-            text = to_str(sent)
+            text = to_str(sent, encoding)
             logging.info('{}: {}'.format(name, text))
             writer.add_text('val/{}'.format(name), text, step)
         for sent_i, (tgts, gen) in enumerate(sent_pairs):
@@ -263,7 +265,7 @@ def evaluate_model_(
     tgts, gens = zip(*sent_pairs)
     corpus_bleu_score = corpus_bleu(tgts, gens)
 
-    sent_pairs = list(map(apply_on_sent_pair(to_str), sent_pairs))
+    sent_pairs = list(map(apply_on_sent_pair(lambda s: to_str(s, encoding)), sent_pairs))
     tgts, gens = zip(*sent_pairs)
     gens = tuple([gen if gen else ' ' for gen in gens])
 

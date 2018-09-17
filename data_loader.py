@@ -1,3 +1,4 @@
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import torch
 import torchvision.transforms as transforms
 import torch.utils.data as data

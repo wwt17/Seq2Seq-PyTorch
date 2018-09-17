@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import os
 import contextlib
 import logging
@@ -83,18 +84,6 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
         if train_config.enable_pg:
             ret['ce']['pg'] = {}
 
-            ids_sample, logprobs_sample = model(
-                src,
-                tgt_sents[:, :-1],
-                max_decode_length=train_config.max_decode_length,
-                beam=-1)
-            logits_greedy = model(
-                src,
-                tgt_sents[:, :-1],
-                max_decode_length=train_config.max_decode_length,
-                beam=1)
-            logprobs_greedy, ids_greedy = logits_greedy.max(-1)
-
             def seq_tolist(ids):
                 a = ids.tolist()
                 try:
@@ -104,17 +93,69 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
             def tolist(ids):
                 return list(map(seq_tolist, ids.cpu().numpy()))
 
-            seq_sample = tolist(ids_sample)
-            seq_greedy = tolist(ids_greedy)
-            seq_target = tolist(tgt_sents[:, 1:])
+            if hasattr(train_config, 'sample_baseline') and train_config.sample_baseline:
+                def tile_batch(a, m):
+                    shape = list(a.size())
+                    a = a.unsqueeze(1).repeat(
+                        *[m if d == 1 else 1 for d in range(len(shape)+1)])
+                    a = a.contiguous().view(*([-1] + shape[1:]))
+                    return a
+                def untile_batch(a, m):
+                    shape = list(a.size())
+                    return a.view(*([-1, m] + shape[1:]))
 
-            pgl = []
-            for seq_s, seq_g, seq_t, logprob_sample \
-            in zip(seq_sample, seq_greedy, seq_target, logprobs_sample):
-                reward = ( sentence_bleu([seq_t], seq_s)
-                          -sentence_bleu([seq_t], seq_g))
-                pgl.append(reward * -logprob_sample[:len(seq_sample)].sum())
-            pgl = torch.stack(pgl).mean()
+                src_ = tile_batch(src, train_config.sample_baseline)
+                tgt_sents_ = tile_batch(tgt_sents, train_config.sample_baseline)
+                ids_sample, logprobs_sample = model(
+                    src_,
+                    tgt_sents_[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=-1)
+
+                seq_sample = tolist(ids_sample)
+                seq_target = tolist(tgt_sents_[:, 1:])
+
+                rewards = []
+                for seq_s, seq_t in zip(seq_sample, seq_target):
+                    rewards.append(sentence_bleu([seq_t], seq_s))
+                rewards = torch.tensor(rewards, device=device)
+
+                rewards = untile_batch(rewards, train_config.sample_baseline)
+                mean_rewards = rewards.mean(1, keepdim=True)
+                rewards = rewards - mean_rewards
+                rewards = rewards.view(-1)
+
+                len_sample = torch.tensor(list(map(len, seq_sample)), device=device)
+                mask = torch.le(torch.arange(logprobs_sample.size(1), device=device), len_sample.unsqueeze(1))
+
+                pgl = -(rewards * (mask.float() * logprobs_sample).sum(1)).mean()
+
+            else:
+                ids_sample, logprobs_sample = model(
+                    src,
+                    tgt_sents[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=-1)
+                logits_greedy = model(
+                    src,
+                    tgt_sents[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=1)
+                logprobs_greedy, ids_greedy = logits_greedy.max(-1)
+
+                seq_sample = tolist(ids_sample)
+                seq_greedy = tolist(ids_greedy)
+                seq_target = tolist(tgt_sents[:, 1:])
+
+                pgl = []
+                for seq_s, seq_g, seq_t, logprob_sample \
+                in zip(seq_sample, seq_greedy, seq_target, logprobs_sample):
+                    reward = ( sentence_bleu([seq_t], seq_s)
+                              -sentence_bleu([seq_t], seq_g))
+                    pgl.append(reward * -logprob_sample[:len(seq_sample)].sum())
+                pgl = torch.stack(pgl).mean()
+
+            ret['ce']['pg']['loss'] = pgl
 
         else:
             pgl = 0.
@@ -425,17 +466,17 @@ if __name__ == '__main__':
                 for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
                     if sample_i >= samples:
                         break
-                    l = list(tgt_sent).index(target_vocab.eos_token.encode()) + 1
-                    logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode()))
-                    logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode()))
+                    l = list(tgt_sent).index(target_vocab.eos_token.encode(train_config.encoding)) + 1
+                    logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode(train_config.encoding)))
+                    logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode(train_config.encoding)))
                     if verbose_config.probs_verbose:
-                        logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode()))
+                        logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode(train_config.encoding)))
                         logging.info('gen probs:\n{}'.format(gen_probs[sample_i][:l]))
                         logging.info('gen grads:\n{}'.format(gen_grads[sample_i][:l]))
                         logging.info('max probs:\n{}'.format(max_probs[sample_i][:l]))
                         logging.info('max grads:\n{}'.format(max_grads[sample_i][:l]))
                         for order in range(1, criterion_bleu.max_order + 1):
-                            logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode()))
+                            logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode(train_config.encoding)))
                             logging.info('{}-gram max grads:\n{}'.format(order, max_grad_[sample_i][order-1][:l]))
             losses.append([loss_, cel_, mbl_, grad_norm])
             writer.add_scalar('train/loss', loss_, step)
@@ -471,14 +512,16 @@ if __name__ == '__main__':
             bleu = evaluate_model_(
                 model, encoder, sess, None, data_loader, target_vocab, ids_to_words,
                 verbose_config.eval_max_decode_length, verbose_config.eval_batches,
-                writer, step, logdir, verbose_config.eval_print_samples)
+                writer, step, logdir, verbose_config.eval_print_samples,
+                data_config.encoding)
         else:
             data_iterator.restart_dataset(sess, mode)
             feed_dict = {data_iterator.handle: data_iterator.get_handle(sess, mode)}
             bleu = evaluate_model_(
                 model, None, sess, feed_dict, data_batch, target_vocab, ids_to_words,
                 verbose_config.eval_max_decode_length, verbose_config.eval_batches,
-                writer, step, logdir, verbose_config.eval_print_samples)
+                writer, step, logdir, verbose_config.eval_print_samples,
+                data_config.encoding)
         bleu *= 100
         logging.info("epoch #{} BLEU: {:.6f}".format(epoch, bleu))
         losses.append((bleu,))

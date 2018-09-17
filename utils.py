@@ -1,3 +1,4 @@
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import torch
 
 def to_onehot(a, n, dtype=torch.long, device=None):

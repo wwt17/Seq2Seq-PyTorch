@@ -13,6 +13,7 @@ import operator
 from socket import gethostname
 
 from nltk.translate.bleu_score import sentence_bleu, corpus_bleu, SmoothingFunction
+from texar.evals import sentence_bleu
 from rouge import Rouge
 rouge = Rouge()
 
@@ -158,8 +159,8 @@ def model_perplexity(
 
     return np.exp(np.mean(losses))
 
-def to_str(sent):
-    return b' '.join(sent).decode()
+def to_str(sent, encoding):
+    return b' '.join(sent).decode(encoding)
 
 def average_len(tgt):
     return sum(map(len, tgt)) / len(tgt)
@@ -172,11 +173,12 @@ def apply_on_sent_pair(fn):
 
 def evaluate_model_(
     model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
-    max_decode_length, eval_batches, writer, step, logdir, print_samples=0
+    max_decode_length, eval_batches, writer, step, logdir, print_samples=0,
+    encoding='utf-8'
 ):
     captioning = (encoder is not None)
-    bos_token = target_vocab.bos_token.encode()
-    eos_token = target_vocab.eos_token.encode()
+    bos_token = target_vocab.bos_token.encode(encoding)
+    eos_token = target_vocab.eos_token.encode(encoding)
     def strip_bos_and_eos(sent):
         if sent and sent[0] == bos_token:
             sent = sent[1:]
@@ -228,7 +230,7 @@ def evaluate_model_(
     if print_samples > 0:
         logging.info("eval samples:")
         def log_sent(sent, name):
-            text = to_str(sent)
+            text = to_str(sent, encoding)
             logging.info('{}: {}'.format(name, text))
             writer.add_text('val/{}'.format(name), text, step)
         for sent_i, (tgts, gen) in enumerate(sent_pairs):
@@ -241,14 +243,12 @@ def evaluate_model_(
     sent_pairs = list(filter(lambda pair: pair[0][0], sent_pairs))
     sent_pairs.sort(key=lambda sent_pair: (average_len(sent_pair[0]), sent_pair[0]))
 
-    sent_bleu_fn = lambda tgt, gen: sentence_bleu(
-                       tgt, gen, smoothing_function=SmoothingFunction().method7)\
-                   if len(tgt) > 1 and len(gen) > 1 else 0.
+    sent_bleu_fn = lambda tgt, gen: sentence_bleu(tgt, gen, smooth=True)
     sent_bleus = [sent_bleu_fn(tgt, gen) for tgt, gen in sent_pairs]
     lens = [average_len(tgt) for tgt, gen in sent_pairs]
     with open(os.path.join(logdir, "eval_bleus_step{}".format(step)), "w") as f:
-        for x in sent_bleus:
-            print("{:.6f}".format(x), file=f)
+        for score, (tgt, gen) in zip(sent_bleus, sent_pairs):
+            print("{:.6f}\t{}\t{}".format(score, tgt, gen), file=f)
     with open(os.path.join(logdir, "eval_lens"), "w") as f:
         for x in lens:
             print("{:.6f}".format(x), file=f)
@@ -263,7 +263,7 @@ def evaluate_model_(
     tgts, gens = zip(*sent_pairs)
     corpus_bleu_score = corpus_bleu(tgts, gens)
 
-    sent_pairs = list(map(apply_on_sent_pair(to_str), sent_pairs))
+    sent_pairs = list(map(apply_on_sent_pair(lambda s: to_str(s, encoding)), sent_pairs))
     tgts, gens = zip(*sent_pairs)
     gens = tuple([gen if gen else ' ' for gen in gens])
 

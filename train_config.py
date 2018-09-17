@@ -8,7 +8,11 @@ teach_rate_anneal_steps = 100
 gamma = 1.0
 bleu_w = 0.0
 enable_cross_entropy = True
-enable_bleu = True
+enable_xe = True
+enable_pg = False
+xe_w = 1.
+pg_w = 0.
+enable_bleu = False
 enable_prec = True
 enable_recall = False
 recall_w = 0.0
@@ -20,7 +24,7 @@ soft_length_mask = False
 max_decode_length = None
 
 optimizer = "adam"
-lr = 1e-5
+lr = 1e-3
 clip_grad_norm = 5
 
 pretrain = 0
@@ -43,4 +47,4 @@ if recall_w != 0:
 
 checkpoints = True
 
-exp_name = "ce"
+exp_name = "xe"

@@ -1,4 +1,5 @@
 """Evaluation utils."""
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -174,7 +175,7 @@ def apply_on_sent_pair(fn):
 def evaluate_model_(
     model, encoder, sess, feed_dict, data_loader, target_vocab, ids_to_words,
     max_decode_length, eval_batches, writer, step, logdir, print_samples=0,
-    encoding='utf-8'
+    encoding='utf8',
 ):
     captioning = (encoder is not None)
     bos_token = target_vocab.bos_token.encode(encoding)

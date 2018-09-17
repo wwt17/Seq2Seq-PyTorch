@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import print_function, division, absolute_import, with_statement, unicode_literals, generators
 import os
 import contextlib
 import logging
@@ -83,18 +84,6 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
         if train_config.enable_pg:
             ret['ce']['pg'] = {}
 
-            ids_sample, logprobs_sample = model(
-                src,
-                tgt_sents[:, :-1],
-                max_decode_length=train_config.max_decode_length,
-                beam=-1)
-            logits_greedy = model(
-                src,
-                tgt_sents[:, :-1],
-                max_decode_length=train_config.max_decode_length,
-                beam=1)
-            logprobs_greedy, ids_greedy = logits_greedy.max(-1)
-
             def seq_tolist(ids):
                 a = ids.tolist()
                 try:
@@ -104,17 +93,69 @@ def run_model(model, encoder, batch, target_vocab, teach_rate, device, verbose=F
             def tolist(ids):
                 return list(map(seq_tolist, ids.cpu().numpy()))
 
-            seq_sample = tolist(ids_sample)
-            seq_greedy = tolist(ids_greedy)
-            seq_target = tolist(tgt_sents[:, 1:])
+            if hasattr(train_config, 'sample_baseline') and train_config.sample_baseline:
+                def tile_batch(a, m):
+                    shape = list(a.size())
+                    a = a.unsqueeze(1).repeat(
+                        *[m if d == 1 else 1 for d in range(len(shape)+1)])
+                    a = a.contiguous().view(*([-1] + shape[1:]))
+                    return a
+                def untile_batch(a, m):
+                    shape = list(a.size())
+                    return a.view(*([-1, m] + shape[1:]))
 
-            pgl = []
-            for seq_s, seq_g, seq_t, logprob_sample \
-            in zip(seq_sample, seq_greedy, seq_target, logprobs_sample):
-                reward = ( sentence_bleu([seq_t], seq_s)
-                          -sentence_bleu([seq_t], seq_g))
-                pgl.append(reward * -logprob_sample[:len(seq_sample)].sum())
-            pgl = torch.stack(pgl).mean()
+                src_ = tile_batch(src, train_config.sample_baseline)
+                tgt_sents_ = tile_batch(tgt_sents, train_config.sample_baseline)
+                ids_sample, logprobs_sample = model(
+                    src_,
+                    tgt_sents_[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=-1)
+
+                seq_sample = tolist(ids_sample)
+                seq_target = tolist(tgt_sents_[:, 1:])
+
+                rewards = []
+                for seq_s, seq_t in zip(seq_sample, seq_target):
+                    rewards.append(sentence_bleu([seq_t], seq_s))
+                rewards = torch.tensor(rewards, device=device)
+
+                rewards = untile_batch(rewards, train_config.sample_baseline)
+                mean_rewards = rewards.mean(1, keepdim=True)
+                rewards = rewards - mean_rewards
+                rewards = rewards.view(-1)
+
+                len_sample = torch.tensor(list(map(len, seq_sample)), device=device)
+                mask = torch.le(torch.arange(logprobs_sample.size(1), device=device), len_sample.unsqueeze(1))
+
+                pgl = -(rewards * (mask.float() * logprobs_sample).sum(1)).mean()
+
+            else:
+                ids_sample, logprobs_sample = model(
+                    src,
+                    tgt_sents[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=-1)
+                logits_greedy = model(
+                    src,
+                    tgt_sents[:, :-1],
+                    max_decode_length=train_config.max_decode_length,
+                    beam=1)
+                logprobs_greedy, ids_greedy = logits_greedy.max(-1)
+
+                seq_sample = tolist(ids_sample)
+                seq_greedy = tolist(ids_greedy)
+                seq_target = tolist(tgt_sents[:, 1:])
+
+                pgl = []
+                for seq_s, seq_g, seq_t, logprob_sample \
+                in zip(seq_sample, seq_greedy, seq_target, logprobs_sample):
+                    reward = ( sentence_bleu([seq_t], seq_s)
+                              -sentence_bleu([seq_t], seq_g))
+                    pgl.append(reward * -logprob_sample[:len(seq_sample)].sum())
+                pgl = torch.stack(pgl).mean()
+
+            ret['ce']['pg']['loss'] = pgl
 
         else:
             pgl = 0.

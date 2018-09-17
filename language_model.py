@@ -466,17 +466,17 @@ if __name__ == '__main__':
                 for sample_i, (gen_sent, tgt_sent) in enumerate(zip(gen_words, tgt_words)):
                     if sample_i >= samples:
                         break
-                    l = list(tgt_sent).index(target_vocab.eos_token.encode(train_config.encoding)) + 1
-                    logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode(train_config.encoding)))
-                    logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode(train_config.encoding)))
+                    l = list(tgt_sent).index(target_vocab.eos_token.encode(data_config.encoding)) + 1
+                    logging.info('tgt: {}'.format(b' '.join(tgt_sent[:l]).decode(data_config.encoding)))
+                    logging.info('gen: {}'.format(b' '.join(gen_sent[:l]).decode(data_config.encoding)))
                     if verbose_config.probs_verbose:
-                        logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode(train_config.encoding)))
+                        logging.info('max: {}'.format(b' '.join(max_words[sample_i][:l]).decode(data_config.encoding)))
                         logging.info('gen probs:\n{}'.format(gen_probs[sample_i][:l]))
                         logging.info('gen grads:\n{}'.format(gen_grads[sample_i][:l]))
                         logging.info('max probs:\n{}'.format(max_probs[sample_i][:l]))
                         logging.info('max grads:\n{}'.format(max_grads[sample_i][:l]))
                         for order in range(1, criterion_bleu.max_order + 1):
-                            logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode(train_config.encoding)))
+                            logging.info('{}-gram max: {}'.format(order, b' '.join(max_word_[sample_i][order-1][:l]).decode(data_config.encoding)))
                             logging.info('{}-gram max grads:\n{}'.format(order, max_grad_[sample_i][order-1][:l]))
             losses.append([loss_, cel_, mbl_, grad_norm])
             writer.add_scalar('train/loss', loss_, step)
